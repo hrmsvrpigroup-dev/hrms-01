@@ -54,6 +54,7 @@ router.post('/verifications/:id/:action', hrOnboardingController.updateVerificat
 // Attendance Calendar
 router.get('/attendance-summary', hrController.getAttendanceCalendarSummary)
 router.get('/attendance/details', hrController.getAttendanceDetails)
+router.get('/monthly-report', hrController.getMonthlyReport)
 router.get('/employees/:id/portfolio', hrController.getEmployeePortfolio)
 
 export default router

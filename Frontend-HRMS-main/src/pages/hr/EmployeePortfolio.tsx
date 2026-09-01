@@ -2,7 +2,8 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Download, Calendar, TrendingUp, Activity, BarChart2,
-  Target, Coffee, FileText, Mail, Phone, MapPin, CheckCircle2, XCircle, Award
+  Target, Coffee, FileText, Mail, Phone, MapPin, CheckCircle2, XCircle, Award,
+  Clock, Search, ChevronLeft, ChevronRight, Filter, AlertTriangle, UserCheck, UserX
 } from 'lucide-react'
 import { hrApi } from '../../api/hr.api'
 
@@ -60,12 +61,62 @@ function TaskBadge({ status }: { status: string }) {
   return <span style={{ padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: s.bg, color: s.color }}>{s.label}</span>
 }
 
+function AttendanceStatusBadge({ status }: { status: string }) {
+  const configs: Record<string, { label: string; bg: string; color: string; border: string; icon: React.ReactNode }> = {
+    PRESENT: { label: 'Present', bg: '#dcfce7', color: '#16a34a', border: '#bbf7d0', icon: <CheckCircle2 size={13} /> },
+    ABSENT: { label: 'Absent', bg: '#fee2e2', color: '#dc2626', border: '#fecaca', icon: <XCircle size={13} /> },
+    LATE: { label: 'Late', bg: '#fef3c7', color: '#d97706', border: '#fde68a', icon: <Clock size={13} /> },
+    HALF_DAY: { label: 'Half Day', bg: '#e0f2fe', color: '#0284c7', border: '#bae6fd', icon: <Clock size={13} /> },
+    ON_LEAVE: { label: 'On Leave', bg: '#ede9fe', color: '#7c3aed', border: '#ddd6fe', icon: <Calendar size={13} /> },
+  }
+  const cfg = configs[status] || { label: status, bg: '#f1f5f9', color: '#64748b', border: '#e2e8f0', icon: <Clock size={13} /> }
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      padding: '4px 10px',
+      borderRadius: 20,
+      fontSize: 12,
+      fontWeight: 700,
+      background: cfg.bg,
+      color: cfg.color,
+      border: `1px solid ${cfg.border}`
+    }}>
+      {cfg.icon}
+      {cfg.label}
+    </span>
+  )
+}
+
+function formatTime(val?: string | null) {
+  if (!val) return '—'
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+}
+
+function formatDateDisplay(val: string | Date) {
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return { dayOfWeek: '—', dateFormatted: String(val) }
+  return {
+    dayOfWeek: d.toLocaleDateString('en-US', { weekday: 'short' }),
+    dateFormatted: d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
+  }
+}
+
 export default function HREmployeePortfolio() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const portfolioRef = useRef<HTMLDivElement>(null)
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+
+  // Attendance Date-Wise Filters
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<'ALL' | 'PRESENT' | 'ABSENT' | 'LATE' | 'HALF_DAY' | 'ON_LEAVE'>('ALL')
+  const [attendanceSearch, setAttendanceSearch] = useState('')
+  const [attendancePage, setAttendancePage] = useState(1)
+  const pageSize = 10
 
   useEffect(() => {
     if (!id) return
@@ -92,12 +143,51 @@ export default function HREmployeePortfolio() {
   const performanceScore = Math.round((att.attendancePercent * 0.6) + (task.taskCompletionRate * 0.4))
   const scoreColor = performanceScore >= 80 ? '#16a34a' : performanceScore >= 60 ? '#d97706' : '#dc2626'
 
+  // Daily attendance records
+  const rawRecords: any[] = att.records || []
+  const filteredAttendance = rawRecords.filter((rec: any) => {
+    const matchesStatus = attendanceStatusFilter === 'ALL' || rec.status === attendanceStatusFilter
+    if (!matchesStatus) return false
+
+    if (attendanceSearch.trim()) {
+      const q = attendanceSearch.toLowerCase().trim()
+      const d = new Date(rec.date)
+      const dateStr = !isNaN(d.getTime()) ? d.toLocaleDateString('en-US', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }).toLowerCase() : ''
+      const statusStr = (rec.status || '').toLowerCase()
+      if (!dateStr.includes(q) && !statusStr.includes(q)) {
+        return false
+      }
+    }
+    return true
+  })
+
+  const totalPages = Math.ceil(filteredAttendance.length / pageSize) || 1
+  const paginatedRecords = filteredAttendance.slice((attendancePage - 1) * pageSize, attendancePage * pageSize)
+
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
         .portfolio-page * { font-family: 'Inter', sans-serif; box-sizing: border-box; }
-        @media print { .no-print { display: none !important; } .portfolio-card { box-shadow: none !important; } }
+        @media print {
+          .no-print { display: none !important; }
+          .portfolio-card { box-shadow: none !important; break-inside: avoid; }
+        }
+        .filter-btn {
+          padding: 6px 14px;
+          border-radius: 20px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1px solid transparent;
+          transition: all 0.2s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .attendance-row:hover {
+          background-color: #f8fafc;
+        }
       `}</style>
 
       <div className="portfolio-page" style={{ background: '#f8fafc', minHeight: '100vh', padding: '24px 32px' }}>
@@ -228,6 +318,292 @@ export default function HREmployeePortfolio() {
               <div style={{ fontWeight: 800, fontSize: 16, color: '#0f172a' }}>Monthly Attendance Trend (Last 6 Months)</div>
             </div>
             <BarChart data={att.monthlyAttendance} />
+          </div>
+
+          {/* ===== DATE-WISE ATTENDANCE SECTION (PRESENT / ABSENT) ===== */}
+          <div className="portfolio-card" style={{
+            background: '#fff',
+            borderRadius: 20,
+            padding: 28,
+            marginBottom: 24,
+            border: '1px solid #e8ecf4',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.04)'
+          }}>
+            {/* Section Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: '#dcfce7', padding: 8, borderRadius: 10, color: '#16a34a' }}>
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: '#0f172a' }}>Date-Wise Attendance History</div>
+                  <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Daily present & absent logs, punch timings, and duration</div>
+                </div>
+              </div>
+
+              {/* Summary Stats Badges */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ background: '#dcfce7', color: '#16a34a', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                  {att.presentDays} Present
+                </span>
+                <span style={{ background: '#fee2e2', color: '#dc2626', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                  {att.absentDays} Absent
+                </span>
+                {att.lateDays > 0 && (
+                  <span style={{ background: '#fef3c7', color: '#d97706', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                    {att.lateDays} Late
+                  </span>
+                )}
+                {att.leaveDays > 0 && (
+                  <span style={{ background: '#ede9fe', color: '#7c3aed', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                    {att.leaveDays} On Leave
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Filter Bar & Search */}
+            <div className="no-print" style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 18,
+              padding: '12px 16px',
+              background: '#f8fafc',
+              borderRadius: 14,
+              border: '1px solid #edf2f7'
+            }}>
+              {/* Status Filter Tabs */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {[
+                  { key: 'ALL', label: 'All Dates', count: rawRecords.length, bg: '#6366f1', text: '#fff' },
+                  { key: 'PRESENT', label: 'Present', count: att.presentDays, bg: '#16a34a', text: '#fff' },
+                  { key: 'ABSENT', label: 'Absent', count: att.absentDays, bg: '#dc2626', text: '#fff' },
+                  { key: 'LATE', label: 'Late', count: att.lateDays, bg: '#d97706', text: '#fff' },
+                  { key: 'HALF_DAY', label: 'Half Day', count: att.halfDays || 0, bg: '#0284c7', text: '#fff' },
+                  { key: 'ON_LEAVE', label: 'Leave', count: att.leaveDays, bg: '#7c3aed', text: '#fff' },
+                ].map(item => {
+                  const isActive = attendanceStatusFilter === item.key
+                  return (
+                    <button
+                      key={item.key}
+                      className="filter-btn"
+                      onClick={() => {
+                        setAttendanceStatusFilter(item.key as any)
+                        setAttendancePage(1)
+                      }}
+                      style={{
+                        background: isActive ? item.bg : '#fff',
+                        color: isActive ? item.text : '#475569',
+                        border: isActive ? `1px solid ${item.bg}` : '1px solid #e2e8f0',
+                        boxShadow: isActive ? '0 2px 6px rgba(0,0,0,0.1)' : 'none'
+                      }}
+                    >
+                      {item.label}
+                      <span style={{
+                        background: isActive ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                        color: isActive ? '#fff' : '#64748b',
+                        padding: '1px 6px',
+                        borderRadius: 10,
+                        fontSize: 11,
+                        fontWeight: 700
+                      }}>
+                        {item.count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Date / Month Search */}
+              <div style={{ position: 'relative', minWidth: 220 }}>
+                <Search size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  placeholder="Search date or month..."
+                  value={attendanceSearch}
+                  onChange={(e) => {
+                    setAttendanceSearch(e.target.value)
+                    setAttendancePage(1)
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px 8px 34px',
+                    borderRadius: 10,
+                    border: '1px solid #e2e8f0',
+                    fontSize: 13,
+                    background: '#fff',
+                    outline: 'none',
+                    color: '#0f172a'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Attendance Table */}
+            {filteredAttendance.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', background: '#f8fafc', borderRadius: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                  <Calendar size={20} />
+                </div>
+                <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 14 }}>No Attendance Records Found</div>
+                <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                  {rawRecords.length === 0 ? 'No attendance has been logged yet for this employee.' : 'No records match your selected filter or search term.'}
+                </div>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #f1f5f9', background: '#f8fafc' }}>
+                      <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#475569', borderRadius: '8px 0 0 8px' }}>DATE & DAY</th>
+                      <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#475569' }}>STATUS</th>
+                      <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#475569' }}>CLOCK IN</th>
+                      <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#475569' }}>CLOCK OUT</th>
+                      <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#475569' }}>TOTAL HOURS</th>
+                      <th style={{ padding: '12px 16px', fontSize: 12, fontWeight: 700, color: '#475569', borderRadius: '0 8px 8px 0' }}>REMARKS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedRecords.map((rec: any, idx: number) => {
+                      const { dayOfWeek, dateFormatted } = formatDateDisplay(rec.date)
+                      const isAbsent = rec.status === 'ABSENT'
+                      const isPresent = rec.status === 'PRESENT'
+                      const isLate = rec.status === 'LATE'
+                      const isLeave = rec.status === 'ON_LEAVE'
+                      const isHalfDay = rec.status === 'HALF_DAY'
+
+                      return (
+                        <tr key={idx} className="attendance-row" style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }}>
+                          <td style={{ padding: '14px 16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{
+                                width: 34,
+                                height: 34,
+                                borderRadius: 8,
+                                background: isAbsent ? '#fee2e2' : isPresent ? '#dcfce7' : isLate ? '#fef3c7' : '#ede9fe',
+                                color: isAbsent ? '#dc2626' : isPresent ? '#16a34a' : isLate ? '#d97706' : '#7c3aed',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 800,
+                                fontSize: 11,
+                                flexShrink: 0
+                              }}>
+                                {dayOfWeek}
+                              </div>
+                              <div>
+                                <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13 }}>{dateFormatted}</div>
+                                <div style={{ fontSize: 11, color: '#94a3b8' }}>{dayOfWeek}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            <AttendanceStatusBadge status={rec.status} />
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: rec.clockIn ? '#0f172a' : '#94a3b8' }}>
+                            {formatTime(rec.clockIn)}
+                          </td>
+                          <td style={{ padding: '14px 16px', fontSize: 13, fontWeight: 600, color: rec.clockOut ? '#0f172a' : '#94a3b8' }}>
+                            {formatTime(rec.clockOut)}
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            {rec.totalHours && rec.totalHours > 0 ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
+                                  {rec.totalHours.toFixed(1)}h
+                                </span>
+                                <div style={{ width: 50, height: 5, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{
+                                    width: `${Math.min(100, (rec.totalHours / 8) * 100)}%`,
+                                    height: '100%',
+                                    background: rec.totalHours >= 8 ? '#16a34a' : '#f59e0b',
+                                    borderRadius: 3
+                                  }} />
+                                </div>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 13, color: '#94a3b8' }}>—</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '14px 16px' }}>
+                            {isAbsent && <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>Unexcused / Absent</span>}
+                            {isPresent && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>Full Day Present</span>}
+                            {isLate && <span style={{ fontSize: 12, color: '#d97706', fontWeight: 600 }}>Late Arrival</span>}
+                            {isLeave && <span style={{ fontSize: 12, color: '#7c3aed', fontWeight: 600 }}>Approved Leave</span>}
+                            {isHalfDay && <span style={{ fontSize: 12, color: '#0284c7', fontWeight: 600 }}>Half Day Shift</span>}
+                            {!isAbsent && !isPresent && !isLate && !isLeave && !isHalfDay && (
+                              <span style={{ fontSize: 12, color: '#64748b' }}>Recorded</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Pagination Controls */}
+                {filteredAttendance.length > pageSize && (
+                  <div className="no-print" style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: 16,
+                    paddingTop: 14,
+                    borderTop: '1px solid #f1f5f9'
+                  }}>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                      Showing <strong>{(attendancePage - 1) * pageSize + 1}</strong> to <strong>{Math.min(attendancePage * pageSize, filteredAttendance.length)}</strong> of <strong>{filteredAttendance.length}</strong> date records
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        onClick={() => setAttendancePage(p => Math.max(1, p - 1))}
+                        disabled={attendancePage === 1}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          background: attendancePage === 1 ? '#f8fafc' : '#fff',
+                          color: attendancePage === 1 ? '#cbd5e1' : '#374151',
+                          cursor: attendancePage === 1 ? 'not-allowed' : 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600
+                        }}
+                      >
+                        <ChevronLeft size={14} /> Previous
+                      </button>
+                      <span style={{ padding: '0 8px', fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+                        Page {attendancePage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setAttendancePage(p => Math.min(totalPages, p + 1))}
+                        disabled={attendancePage === totalPages}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          background: attendancePage === totalPages ? '#f8fafc' : '#fff',
+                          color: attendancePage === totalPages ? '#cbd5e1' : '#374151',
+                          cursor: attendancePage === totalPages ? 'not-allowed' : 'pointer',
+                          fontSize: 12,
+                          fontWeight: 600
+                        }}
+                      >
+                        Next <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Recent Tasks */}

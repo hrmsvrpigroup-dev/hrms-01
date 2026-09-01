@@ -189,9 +189,6 @@ export const employeeController = {
 
     try {
       const whereClause: any = { tenantId }
-      if (req.user?.role === 'HR') {
-        whereClause.hrUserId = req.user.id
-      }
 
       const employees = await prisma.employee.findMany({
         where: whereClause,

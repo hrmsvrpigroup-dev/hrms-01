@@ -15,7 +15,7 @@ export const hrApi = {
   },
 
   getEmployees: async () => {
-    const response = await api.get('/hr/employees')
+    const response = await api.get('/employees')
     return response.data
   },
   
@@ -50,6 +50,11 @@ export const hrApi = {
 
   getEmployeePortfolio: async (id: string) => {
     const response = await api.get<{ success: boolean; data: any }>(`/hr/employees/${id}/portfolio`)
+    return response.data.data
+  },
+
+  getMonthlyReport: async (year: number, month: number) => {
+    const response = await api.get<{ success: boolean; data: any }>(`/hr/monthly-report?year=${year}&month=${month}`)
     return response.data.data
   },
 }

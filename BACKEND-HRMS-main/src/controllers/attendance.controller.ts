@@ -15,8 +15,6 @@ export const attendanceController = {
     const whereClause: any = { tenantId }
     if (req.user?.role === UserRole.EMPLOYEE) {
       whereClause.employee = { userId: req.user.id }
-    } else if (req.user?.role === UserRole.HR) {
-      whereClause.employee = { hrUserId: req.user.id }
     }
 
     try {

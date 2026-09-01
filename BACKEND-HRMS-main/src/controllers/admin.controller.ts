@@ -866,7 +866,8 @@ export const adminController = {
           earlyLogins,
           avgHours: parseFloat(avgHours.toFixed(1)),
           attendancePercent,
-          monthlyAttendance
+          monthlyAttendance,
+          records: employee.attendance.slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
         },
         taskStats: {
           totalTasks,

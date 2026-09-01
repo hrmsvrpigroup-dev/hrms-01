@@ -11,6 +11,7 @@ export default function HRLayout() {
         { to: '/hr/attendance', label: 'Attendance' },
         { to: '/hr/manual-attendance', label: 'Manual Attendance' },
         { to: '/hr/calendar', label: 'Calendar' },
+        { to: '/hr/monthly-report', label: 'Monthly Report' },
         { to: '/hr/leaves', label: 'Leave Approvals' },
         { to: '/hr/recruitment', label: 'Recruitment' },
         { to: '/hr/tasks', label: 'Task Assignment' },

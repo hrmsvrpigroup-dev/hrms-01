@@ -36,6 +36,7 @@ import HRCalendar from './pages/hr/Calendar'
 import HRAttendanceDetails from './pages/hr/AttendanceDetails'
 import ManualAttendance from './pages/hr/ManualAttendance'
 import HREmployeePortfolio from './pages/hr/EmployeePortfolio'
+import MonthlyReport from './pages/hr/MonthlyReport'
 import OnboardingPage from './pages/onboarding/OnboardingPage'
 import HRVerificationPanel from './pages/onboarding/HRVerificationPanel'
 import EmployeeApprovalPanel from './pages/onboarding/EmployeeApprovalPanel'
@@ -159,6 +160,7 @@ export default function App() {
             <Route path="/hr/attendance" element={<Attendance />} />
             <Route path="/hr/manual-attendance" element={<ManualAttendance />} />
             <Route path="/hr/calendar" element={<HRCalendar />} />
+            <Route path="/hr/monthly-report" element={<MonthlyReport />} />
             <Route path="/hr/attendance/details" element={<HRAttendanceDetails />} />
             <Route path="/hr/employees/:id/portfolio" element={<HREmployeePortfolio />} />
             <Route path="/hr/leaves" element={<LeaveApprovals />} />
