@@ -48,9 +48,11 @@ export const notificationService = {
     }
 
     let useNodemailer = false
+    let resendErrorDetail = ''
 
     try {
       if (!process.env.RESEND_API_KEY || process.env.RESEND_API_KEY.startsWith('re_placeholder')) {
+        resendErrorDetail = 'RESEND_API_KEY is not configured or is a placeholder'
         useNodemailer = true
       } else {
         // Try Resend
@@ -59,8 +61,10 @@ export const notificationService = {
           content: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,
         }))
 
+        const fromAddress = process.env.RESEND_FROM || process.env.SMTP_FROM || 'HRMS <onboarding@resend.dev>'
+
         const { data, error } = await getResendClient().emails.send({
-          from: process.env.SMTP_FROM || 'HRMS <onboarding@resend.dev>', 
+          from: fromAddress, 
           to: [to],
           subject,
           html,
@@ -69,6 +73,7 @@ export const notificationService = {
         })
 
         if (error) {
+          resendErrorDetail = error.message || JSON.stringify(error)
           console.error(`[Resend ERROR] Failed to send email to ${to}:`, error)
           // Fallback to Nodemailer if API key is invalid or other error
           useNodemailer = true
@@ -78,6 +83,7 @@ export const notificationService = {
         }
       }
     } catch (error: any) {
+      resendErrorDetail = error.message || String(error)
       console.error(`[Resend ERROR Exception] Failed to send email to ${to}:`, error.message)
       useNodemailer = true
     }
@@ -101,7 +107,8 @@ export const notificationService = {
         return { success: true, messageId: info.messageId }
       } catch (smtpError: any) {
         console.error(`[Nodemailer ERROR] Failed to send email to ${to}:`, smtpError.message)
-        throw new Error(`Email sending failed (both Resend and SMTP failed). Last error: ${smtpError.message}`)
+        const resendMsg = resendErrorDetail ? `Resend failed: ${resendErrorDetail}. ` : ''
+        throw new Error(`Email sending failed (${resendMsg}SMTP failed: ${smtpError.message})`)
       }
     }
   },

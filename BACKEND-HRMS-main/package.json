@@ -14,9 +14,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "seed": "ts-node src/utils/seed.ts",
     "typecheck": "tsc --noEmit",
-    "render-build": "npm install && npx prisma generate && npx prisma db push --accept-data-loss && npm run seed && tsc -p tsconfig.json"
+    "seed": "ts-node src/utils/seed.ts",
+    "render-build": "npm install && npx prisma generate && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",

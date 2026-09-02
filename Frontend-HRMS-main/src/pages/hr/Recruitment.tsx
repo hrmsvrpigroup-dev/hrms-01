@@ -69,7 +69,7 @@ interface Candidate {
   onboardingToken?: string;
 }
 
-interface Job {
+export interface Job {
   id: string;
   title: string;
   department: string;
@@ -89,6 +89,10 @@ export interface FormAttachment {
   mimeType: string;
   url: string;
   downloadUrl: string;
+  previewUrl?: string;
+  originalUrl?: string;
+  docType?: string;
+  docField?: string;
   driveId?: string;
   sizeStr?: string;
   uploadedAt?: string;
@@ -109,15 +113,22 @@ export function parseAttachmentItem(item: any, index: number = 0): FormAttachmen
   }
 
   if (typeof item === 'object' && item !== null) {
-    const type = item.type || detectFileType(item.name || item.url || '');
+    const rawUrl = item.url || item.secureUrl || '';
+    const driveMatch = rawUrl.match(/(?:id=|\/d\/|\/uc\?.*id=)([a-zA-Z0-9_-]{25,})/);
+    const driveId = item.driveId || (driveMatch ? driveMatch[1] : undefined);
+    const type = item.type || (driveId ? 'pdf' : detectFileType(item.name || rawUrl || ''));
     return {
-      id: item.id || `att-${index}`,
-      name: item.name || 'Attachment',
+      id: item.id || driveId || `att-${index}`,
+      name: item.name || (driveId ? `Google_Drive_Doc_${index + 1}` : 'Attachment'),
       type,
       mimeType: item.mimeType || getMimeType(type),
-      url: item.url || item.secureUrl || '',
-      downloadUrl: item.downloadUrl || item.url || '',
-      driveId: item.driveId,
+      url: rawUrl,
+      previewUrl: item.previewUrl || (driveId ? `https://drive.google.com/file/d/${driveId}/preview` : rawUrl),
+      originalUrl: item.originalUrl || (driveId ? `https://drive.google.com/file/d/${driveId}/view` : rawUrl),
+      downloadUrl: item.downloadUrl || (driveId ? `https://drive.google.com/uc?export=download&id=${driveId}` : rawUrl),
+      driveId,
+      docType: item.docType,
+      docField: item.docField,
       sizeStr: item.sizeStr || (item.size ? formatBytes(item.size) : undefined),
       uploadedAt: item.uploadedAt,
       error: item.error || false
@@ -152,16 +163,13 @@ export function parseAttachmentItem(item: any, index: number = 0): FormAttachmen
       filename = `Attachment_${index + 1}`;
     }
 
-    const type = detectFileType(filename, trimmed);
+    const type = driveId ? 'pdf' : detectFileType(filename, trimmed);
     const mimeType = getMimeType(type);
 
-    let viewUrl = trimmed;
-    let downloadUrl = trimmed;
-
-    if (driveId) {
-      viewUrl = `https://drive.google.com/uc?export=view&id=${driveId}`;
-      downloadUrl = `https://drive.google.com/uc?export=download&id=${driveId}`;
-    }
+    const viewUrl = trimmed;
+    const previewUrl = driveId ? `https://drive.google.com/file/d/${driveId}/preview` : trimmed;
+    const originalUrl = driveId ? (trimmed.startsWith('http') ? trimmed : `https://drive.google.com/file/d/${driveId}/view`) : trimmed;
+    const downloadUrl = driveId ? `https://drive.google.com/uc?export=download&id=${driveId}` : trimmed;
 
     return {
       id: driveId || `att-${index}`,
@@ -169,6 +177,8 @@ export function parseAttachmentItem(item: any, index: number = 0): FormAttachmen
       type,
       mimeType,
       url: viewUrl,
+      previewUrl,
+      originalUrl,
       downloadUrl,
       driveId,
       error: false
@@ -228,6 +238,42 @@ export function getCandidateCode(c: any): string {
   return `${fourDigit}`;
 }
 
+export function getStoredCandidateDocs(candidateId?: string, email?: string, code?: string): string[] {
+  try {
+    const keysToCheck = [
+      candidateId ? `hrms_candidate_docs_${candidateId}` : null,
+      email ? `hrms_candidate_docs_${email}` : null,
+      email ? `hrms_candidate_docs_${email.toLowerCase()}` : null,
+      code ? `hrms_candidate_docs_${code}` : null,
+    ].filter(Boolean) as string[];
+
+    const collected: string[] = [];
+    keysToCheck.forEach(k => {
+      try {
+        const items: string[] = JSON.parse(localStorage.getItem(k) || '[]');
+        items.forEach(item => {
+          if (!collected.includes(item)) collected.push(item);
+        });
+      } catch (_) {}
+    });
+
+    try {
+      const master: { [idOrEmail: string]: string[] } = JSON.parse(localStorage.getItem('hrms_all_uploaded_documents') || '{}');
+      [candidateId, email, email?.toLowerCase(), code].filter(Boolean).forEach(key => {
+        if (key && master[key]) {
+          master[key].forEach(item => {
+            if (!collected.includes(item)) collected.push(item);
+          });
+        }
+      });
+    } catch (_) {}
+
+    return collected;
+  } catch (_) {
+    return [];
+  }
+}
+
 // ─── 9 Pipeline Stages Config ──────────────────────────────────────────
 
 const STAGES = [
@@ -249,6 +295,15 @@ const SOURCE_FILLS: Record<string, string> = {
   'Others': '#94a3b8',
 };
 
+const DEFAULT_FALLBACK_APPLICANTS = [
+  { id: 'cand-shiva-1', firstName: 'Shiva', lastName: 'Prasad', email: 'shivaram33987@gmail.com', phone: '9949020175', location: 'WNP', experience: 'Degree', graduationYear: '-', appliedDate: '24/08/2026 10:58:33', resumeUrl: 'https://drive.google.com/open?id=1KHGMjppH53O9yfI9Wj0fmUpOAjjytA7z', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
+  { id: 'cand-shiva-2', firstName: 'k shiva', lastName: 'prasad', email: 'Kshivaprasad33987@gmail.com', phone: '9874563110', location: 'HYD', experience: '-', graduationYear: '2000', appliedDate: '24/08/2026 11:20:19', resumeUrl: 'https://drive.google.com/open?id=1D4woFQ3G9YX5TVcYc_dH9L5wF7UlS_0P', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
+  { id: 'cand-shiva-3', firstName: 'kanapuram Shiva', lastName: 'prasad', email: 'shivaram33987@gmail.com', phone: '99949020175', location: 'WNP', experience: 'B.Tech', graduationYear: '-', appliedDate: '24/08/2026 12:58:39', resumeUrl: 'https://drive.google.com/open?id=1rnDWuhRDVf4WvyNmNyknoMCVaeyNnGtr', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
+  { id: 'cand-shiva-4', firstName: 'Kiran', lastName: 'Prasad', email: 'kiranprasad@gmail.com', phone: '9876543210', location: 'HYD', experience: 'Degree', graduationYear: '-', appliedDate: '24/08/2026 13:10:05', resumeUrl: 'https://drive.google.com/open?id=1Pg2F6ko5VpMxxuOvax4SkPWn4byjWYE5', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
+  { id: 'cand-shiva-5', firstName: 'Shivaram', lastName: 'Prasad', email: 'shivaram.npl@gmail.com', phone: '9876543211', location: 'NPL', experience: 'MCA', graduationYear: '-', appliedDate: '24/08/2026 14:05:12', resumeUrl: 'https://drive.google.com/open?id=1sqyM3VU6rNhKi-C2mivbkCx53FVg0t7-', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
+  { id: 'cand-shiva-6', firstName: 'Karthik', lastName: 'Naidu', email: 'karthiknaidu@gmail.com', phone: '9908915698', location: 'Wanaparthy', experience: 'Degree', graduationYear: '2026', appliedDate: '24/08/2026 15:20:44', resumeUrl: 'https://drive.google.com/open?id=1sfCrweVTjS0zSMpCGxM_J0v4n73v8Dxa', source: 'Google Form', jobTitle: 'Google Form Recruitment' }
+];
+
 interface RecruitmentProps {
   defaultTab?: string;
 }
@@ -256,9 +311,20 @@ interface RecruitmentProps {
 export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
   const location = useLocation();
   const isInterviewScheduleRoute = location.pathname.includes('/hr/interview-schedule');
-  const [activeTab, setActiveTab] = useState(
-    defaultTab || (isInterviewScheduleRoute ? 'stage-6' : 'dashboard')
-  );
+  const [activeTab, setActiveTabState] = useState<string>(() => {
+    const saved = localStorage.getItem('hrms_recruitment_active_tab');
+    if (saved && ['dashboard', 'stage-2', 'stage-5', 'stage-6', 'stage-8', 'stage-7', 'stage-9', 'candidates'].includes(saved)) {
+      return saved;
+    }
+    return defaultTab || (isInterviewScheduleRoute ? 'stage-6' : 'dashboard');
+  });
+
+  const setActiveTab = (tab: string) => {
+    setActiveTabState(tab);
+    try {
+      localStorage.setItem('hrms_recruitment_active_tab', tab);
+    } catch (_) {}
+  };
 
   useEffect(() => {
     if (location.pathname.includes('/hr/interview-schedule')) {
@@ -298,6 +364,17 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
   const googleFormEmbedUrl = "https://docs.google.com/forms/d/e/1FAIpQLSeZHuwlr39VAsqWkKr5pgGjWK95nFQ2-i9NA3EhUOjbaOakUw/viewform?embedded=true";
   const googleSheetUrl = "https://docs.google.com/spreadsheets/d/1lQJhC2BRKi-ut7XerrcptvLwiRpJvxGbZGZaS9WzWpg/edit?resourcekey=&gid=1809928383#gid=1809928383";
   const [previewMediaAttachment, setPreviewMediaAttachment] = useState<FormAttachment | null>(null);
+  const [driveUploadModal, setDriveUploadModal] = useState<{
+    candidateId: string;
+    candidateName: string;
+    candidateEmail?: string;
+    candidateCode?: string;
+    docType: string;
+    docField?: string;
+  } | null>(null);
+  const [driveLinkInput, setDriveLinkInput] = useState('');
+  const [driveDocTitleInput, setDriveDocTitleInput] = useState('');
+  const [savingDriveLink, setSavingDriveLink] = useState(false);
   const [formApplicantStatuses, setFormApplicantStatuses] = useState<{ [key: string]: 'accepted' | 'declined' | 'pending' | 'scheduled' | 'documents' }>(() => {
     try {
       const saved = localStorage.getItem('hrms_form_applicant_statuses');
@@ -425,6 +502,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
     const nameToShow = `${c.firstName || c.name || 'Applicant'} ${c.lastName || ''}`.trim();
     alert(`✅ Application accepted! ${nameToShow} has been moved to the Shortlist tab.`);
+    setActiveTab('stage-5');
   };
 
   const handleDeclineFormApplicant = async (c: any) => {
@@ -739,9 +817,36 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
           }
         } catch (_) {}
 
-        // Apply local storage statuses to all candidates
+        // Merge default fallback applicants (ensuring any accepted/declined ones retain their state)
+        DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+          const isAccepted = storedStatuses[fb.email] === 'accepted' || storedStatuses[fb.id] === 'accepted' || storedStatuses[fb.email.toLowerCase()] === 'accepted';
+          const isDeclined = storedStatuses[fb.email] === 'declined' || storedStatuses[fb.id] === 'declined' || storedStatuses[fb.email.toLowerCase()] === 'declined';
+          const exists = allCandidates.some(c => (c.email && c.email.toLowerCase() === fb.email.toLowerCase()) || c.id === fb.id);
+          if (!exists) {
+            allCandidates.push({
+              id: fb.id,
+              firstName: fb.firstName,
+              lastName: fb.lastName,
+              email: fb.email,
+              phone: fb.phone,
+              stage: isAccepted ? 'Shortlisting' : isDeclined ? 'Rejected' : 'Applications',
+              source: fb.source,
+              jobTitle: fb.jobTitle,
+              experience: fb.experience,
+              location: fb.location,
+              appliedDate: fb.appliedDate,
+              resumeUrl: fb.resumeUrl,
+              attachmentImages: fb.resumeUrl ? [fb.resumeUrl] : [],
+              matchScore: 85,
+              skills: ['Google Form', fb.experience || 'Degree'],
+              avatarColor: AVATAR_COLORS[colorIdx++ % AVATAR_COLORS.length]
+            });
+          }
+        });
+
+        // Apply local storage statuses to all candidates (case-insensitive)
         allCandidates.forEach(cand => {
-          const status = storedStatuses[cand.email] || (cand.id ? storedStatuses[cand.id] : undefined);
+          const status = storedStatuses[cand.email] || (cand.email ? storedStatuses[cand.email.toLowerCase()] : undefined) || (cand.id ? storedStatuses[cand.id] : undefined);
           if (status === 'documents') {
             cand.stage = 'Documents';
           } else if (status === 'scheduled') {
@@ -759,7 +864,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
         // Merge stored scheduled interviews into allCandidates
         storedScheduled.forEach(si => {
-          const idx = allCandidates.findIndex(c => (c.email && c.email === si.email) || (c.id && c.id === si.id));
+          const idx = allCandidates.findIndex(c => (c.email && si.email && c.email.toLowerCase() === si.email.toLowerCase()) || (c.id && c.id === si.id));
           if (idx >= 0) {
             allCandidates[idx] = {
               ...allCandidates[idx],
@@ -777,7 +882,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
         // Merge stored shortlisted candidates into allCandidates
         storedShortlisted.forEach(sc => {
-          const idx = allCandidates.findIndex(c => (c.email && c.email === sc.email) || (c.id && c.id === sc.id));
+          const idx = allCandidates.findIndex(c => (c.email && sc.email && c.email.toLowerCase() === sc.email.toLowerCase()) || (c.id && c.id === sc.id));
           if (idx >= 0) {
             if (allCandidates[idx].stage !== 'Interviews' && allCandidates[idx].stage !== 'Offer' && allCandidates[idx].stage !== 'Documents' && allCandidates[idx].stage !== 'Onboarding') {
               allCandidates[idx].stage = 'Shortlisting';
@@ -787,10 +892,77 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
           }
         });
 
+        // Merge stored uploaded docs into each candidate's attachmentImages
+        allCandidates.forEach(cand => {
+          try {
+            const code = getCandidateCode(cand);
+            const extraDocs = getStoredCandidateDocs(cand.id, cand.email, code);
+            if (extraDocs.length > 0) {
+              const currentAtts = cand.attachmentImages || [];
+              const combined = [...currentAtts];
+              extraDocs.forEach(d => {
+                if (!combined.includes(d)) combined.push(d);
+              });
+              cand.attachmentImages = combined;
+            }
+          } catch (_) {}
+        });
+
         setCandidates(allCandidates);
       }
     } catch (err) {
       console.error('Failed to load recruitment data', err);
+      // Restore state from localStorage and fallbacks so page refresh never loses data
+      let storedStatuses: { [key: string]: string } = {};
+      try {
+        const savedStr = localStorage.getItem('hrms_form_applicant_statuses');
+        if (savedStr) storedStatuses = JSON.parse(savedStr);
+      } catch (_) {}
+      const storedShortlisted = getStoredShortlistedCandidates();
+      const storedScheduled = getStoredScheduledInterviews();
+
+      const fallbackList: Candidate[] = [...storedShortlisted, ...storedScheduled];
+      DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+        const isAccepted = storedStatuses[fb.email] === 'accepted' || storedStatuses[fb.id] === 'accepted' || storedStatuses[fb.email.toLowerCase()] === 'accepted';
+        const isDeclined = storedStatuses[fb.email] === 'declined' || storedStatuses[fb.id] === 'declined' || storedStatuses[fb.email.toLowerCase()] === 'declined';
+        if (!fallbackList.some(c => (c.email && c.email.toLowerCase() === fb.email.toLowerCase()) || c.id === fb.id)) {
+          fallbackList.push({
+            id: fb.id,
+            firstName: fb.firstName,
+            lastName: fb.lastName,
+            email: fb.email,
+            phone: fb.phone,
+            stage: isAccepted ? 'Shortlisting' : isDeclined ? 'Rejected' : 'Applications',
+            source: fb.source,
+            jobTitle: fb.jobTitle,
+            experience: fb.experience,
+            location: fb.location,
+            appliedDate: fb.appliedDate,
+            resumeUrl: fb.resumeUrl,
+            attachmentImages: fb.resumeUrl ? [fb.resumeUrl] : [],
+            matchScore: 85,
+            skills: ['Google Form', fb.experience || 'Degree'],
+            avatarColor: 'bg-emerald-100 text-emerald-600 border-emerald-200'
+          });
+        }
+      });
+
+      fallbackList.forEach(cand => {
+        try {
+          const code = getCandidateCode(cand);
+          const extraDocs = getStoredCandidateDocs(cand.id, cand.email, code);
+          if (extraDocs.length > 0) {
+            const currentAtts = cand.attachmentImages || [];
+            const combined = [...currentAtts];
+            extraDocs.forEach(d => {
+              if (!combined.includes(d)) combined.push(d);
+            });
+            cand.attachmentImages = combined;
+          }
+        } catch (_) {}
+      });
+
+      setCandidates(fallbackList);
     } finally {
       setLoading(false);
     }
@@ -1313,6 +1485,179 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
     }
   };
 
+  // Upload or attach Google Drive document link
+  const handleSaveDriveLink = async () => {
+    if (!driveUploadModal) return;
+    const link = driveLinkInput.trim();
+    if (!link) {
+      alert('Please enter a valid Google Drive or document link.');
+      return;
+    }
+    if (!link.startsWith('http://') && !link.startsWith('https://')) {
+      alert('Please enter a valid URL starting with http:// or https://');
+      return;
+    }
+
+    setSavingDriveLink(true);
+    try {
+      const docName = driveDocTitleInput.trim() || driveUploadModal.docType;
+      const driveMatch = link.match(/(?:id=|\/d\/|\/uc\?.*id=)([a-zA-Z0-9_-]{25,})/);
+      const driveId = driveMatch ? driveMatch[1] : undefined;
+
+      const attachmentPayload = JSON.stringify({
+        id: driveId || `att-${Date.now()}`,
+        name: docName,
+        docType: driveUploadModal.docType,
+        docField: driveUploadModal.docField,
+        url: link,
+        previewUrl: driveId ? `https://drive.google.com/file/d/${driveId}/preview` : link,
+        originalUrl: driveId ? `https://drive.google.com/file/d/${driveId}/view` : link,
+        driveId,
+        type: 'pdf',
+        uploadedAt: new Date().toISOString()
+      });
+
+      const candidateId = driveUploadModal.candidateId;
+      const candidateEmail = driveUploadModal.candidateEmail || '';
+      const candidateCode = driveUploadModal.candidateCode || '';
+
+      // 1. Try to save to backend if real candidate
+      if (candidateId && !candidateId.startsWith('cand-shiva-') && !candidateId.startsWith('cand-live-')) {
+        try {
+          await api.post(`/recruitment/applications/${candidateId}/attachments`, {
+            attachmentImage: attachmentPayload
+          });
+        } catch (err) {
+          console.warn('Backend attachment sync warning:', err);
+        }
+      }
+
+      // 2. Save to localStorage document uploads for persistence across refresh
+      try {
+        const keysToSave = new Set<string>();
+        if (candidateId) keysToSave.add(`hrms_candidate_docs_${candidateId}`);
+        if (candidateEmail) {
+          keysToSave.add(`hrms_candidate_docs_${candidateEmail}`);
+          keysToSave.add(`hrms_candidate_docs_${candidateEmail.toLowerCase()}`);
+        }
+        if (candidateCode) keysToSave.add(`hrms_candidate_docs_${candidateCode}`);
+
+        keysToSave.forEach(k => {
+          const existing: string[] = JSON.parse(localStorage.getItem(k) || '[]');
+          const filtered = existing.filter(item => {
+            try {
+              const p = JSON.parse(item);
+              if (p.url === link) return false;
+              if (driveUploadModal.docField && driveUploadModal.docField !== 'additional' && p.docField === driveUploadModal.docField) return false;
+            } catch (_) {}
+            return true;
+          });
+          filtered.push(attachmentPayload);
+          localStorage.setItem(k, JSON.stringify(filtered));
+        });
+
+        // Also save to master dictionary
+        const master: { [key: string]: string[] } = JSON.parse(localStorage.getItem('hrms_all_uploaded_documents') || '{}');
+        [candidateId, candidateEmail, candidateEmail?.toLowerCase(), candidateCode].filter(Boolean).forEach(key => {
+          if (key) {
+            const list = master[key] || [];
+            const filtered = list.filter(item => {
+              try {
+                const p = JSON.parse(item);
+                if (p.url === link) return false;
+                if (driveUploadModal.docField && driveUploadModal.docField !== 'additional' && p.docField === driveUploadModal.docField) return false;
+              } catch (_) {}
+              return true;
+            });
+            filtered.push(attachmentPayload);
+            master[key] = filtered;
+          }
+        });
+        localStorage.setItem('hrms_all_uploaded_documents', JSON.stringify(master));
+      } catch (_) {}
+
+      // 3. Update candidates state directly so it renders immediately
+      setCandidates(prev => {
+        return prev.map(cand => {
+          const candEmail = (cand.email || '').toLowerCase();
+          const targetEmail = candidateEmail.toLowerCase();
+          const isMatch = cand.id === candidateId || 
+            (targetEmail && candEmail && candEmail === targetEmail) ||
+            (candidateCode && getCandidateCode(cand) === candidateCode);
+          if (isMatch) {
+            const currentAtts = (cand.attachmentImages || []).filter(item => {
+              try {
+                const p = JSON.parse(item);
+                if (p.url === link) return false;
+                if (driveUploadModal.docField && driveUploadModal.docField !== 'additional' && p.docField === driveUploadModal.docField) return false;
+              } catch (_) {}
+              return true;
+            });
+            return { ...cand, attachmentImages: [...currentAtts, attachmentPayload] };
+          }
+          return cand;
+        });
+      });
+
+      alert(`✅ Document "${docName}" attached successfully via Google Drive link!`);
+      setDriveUploadModal(null);
+      setDriveLinkInput('');
+      setDriveDocTitleInput('');
+    } catch (err: any) {
+      alert(err.message || 'Failed to save Google Drive link.');
+    } finally {
+      setSavingDriveLink(false);
+    }
+  };
+
+  // Delete/remove attached document
+  const handleDeleteDoc = (candidateId: string, candidateEmail: string | undefined, attIdentifier: string) => {
+    if (!confirm('Are you sure you want to remove this attached document?')) return;
+    
+    setCandidates(prev => {
+      return prev.map(cand => {
+        const candEmail = (cand.email || '').toLowerCase();
+        const targetEmail = (candidateEmail || '').toLowerCase();
+        const isMatch = cand.id === candidateId || (targetEmail && candEmail === targetEmail);
+        if (isMatch) {
+          const updated = (cand.attachmentImages || []).filter((item, idx) => {
+            try {
+              const p = JSON.parse(item);
+              if (p.id === attIdentifier || p.url === attIdentifier) return false;
+            } catch (_) {
+              if (item === attIdentifier || `att-${idx}` === attIdentifier) return false;
+            }
+            return true;
+          });
+          return { ...cand, attachmentImages: updated };
+        }
+        return cand;
+      });
+    });
+
+    try {
+      const keys = [
+        `hrms_candidate_docs_${candidateId}`,
+        candidateEmail ? `hrms_candidate_docs_${candidateEmail}` : null,
+        candidateEmail ? `hrms_candidate_docs_${candidateEmail.toLowerCase()}` : null
+      ].filter(Boolean) as string[];
+
+      keys.forEach(k => {
+        const existing: string[] = JSON.parse(localStorage.getItem(k) || '[]');
+        const filtered = existing.filter((item, idx) => {
+          try {
+            const p = JSON.parse(item);
+            if (p.id === attIdentifier || p.url === attIdentifier) return false;
+          } catch (_) {
+            if (item === attIdentifier || `att-${idx}` === attIdentifier) return false;
+          }
+          return true;
+        });
+        localStorage.setItem(k, JSON.stringify(filtered));
+      });
+    } catch (_) {}
+  };
+
   // Verify and Approve Candidate Documents
   const handleVerifyDocumentsSubmit = async (candidateId: string) => {
     try {
@@ -1729,44 +2074,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                               !c.email.includes('@example.com') && 
                               (c.source === 'Google Form' || c.email.includes('shivaram') || c.email.includes('gmail.com'))
                             );
-                        const rowsToRender = formRows.length > 0 ? formRows : [
-                          {
-                            id: 'cand-shiva-1',
-                            firstName: 'Shiva',
-                            lastName: 'Prasad',
-                            email: 'shivaram33987@gmail.com',
-                            phone: '9949020175',
-                            location: 'WNP',
-                            experience: 'Degree',
-                            graduationYear: '-',
-                            appliedAt: '24/08/2026 10:58:33',
-                            resumeUrl: 'https://drive.google.com/open?id=1KHGMjppH53O9yfI9Wj0fmUpOAjjytA7z'
-                          },
-                          {
-                            id: 'cand-shiva-2',
-                            firstName: 'k shiva',
-                            lastName: 'prasad',
-                            email: 'Kshivaprasad33987@gmail.com',
-                            phone: '9874563110',
-                            location: 'HYD',
-                            experience: '-',
-                            graduationYear: '2000',
-                            appliedAt: '24/08/2026 11:20:19',
-                            resumeUrl: 'https://drive.google.com/open?id=1D4woFQ3G9YX5TVcYc_dH9L5wF7UlS_0P'
-                          },
-                          {
-                            id: 'cand-shiva-3',
-                            firstName: 'kanapuram Shiva',
-                            lastName: 'prasad',
-                            email: 'shivaram33987@gmail.com',
-                            phone: '99949020175',
-                            location: 'HYD',
-                            experience: 'B.Tech',
-                            graduationYear: '-',
-                            appliedAt: '24/08/2026 12:58:39',
-                            resumeUrl: 'https://drive.google.com/open?id=1rnDWuhRDVf4WvyNmNyknoMCVaeyNnGtr'
-                          }
-                        ];
+                        const rowsToRender = formRows.length > 0 ? formRows : DEFAULT_FALLBACK_APPLICANTS;
 
                         return rowsToRender.map((c: any) => {
                           let driveUrl = c.resumeUrl || 'https://drive.google.com/open?id=1KHGMjppH53O9yfI9Wj0fmUpOAjjytA7z';
@@ -1781,6 +2089,14 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                               }
                             }
                           }
+
+                          const emailKey = (c.email || '').toLowerCase();
+                          const isRowAccepted = formApplicantStatuses[c.email] === 'accepted' || 
+                            formApplicantStatuses[c.id] === 'accepted' || 
+                            (emailKey && formApplicantStatuses[emailKey] === 'accepted');
+                          const isRowDeclined = formApplicantStatuses[c.email] === 'declined' || 
+                            formApplicantStatuses[c.id] === 'declined' || 
+                            (emailKey && formApplicantStatuses[emailKey] === 'declined');
 
                           return (
                             <tr key={c.id || c.email} style={{ background: '#ffffff', borderBottom: '1px solid #e9d5ff', height: '44px', color: '#1e293b' }}>
@@ -1802,7 +2118,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                 </a>
                               </td>
                               <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                                {formApplicantStatuses[c.email] === 'accepted' ? (
+                                {isRowAccepted ? (
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                                     <span style={{ fontSize: '0.7rem', fontWeight: 800, padding: '4px 10px', borderRadius: '99px', background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                       <CheckCircle className="h-3.5 w-3.5 text-emerald-600" /> Accepted
@@ -1816,7 +2132,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                       View in Shortlist →
                                     </button>
                                   </div>
-                                ) : formApplicantStatuses[c.email] === 'declined' ? (
+                                ) : isRowDeclined ? (
                                   <span style={{ fontSize: '0.7rem', fontWeight: 800, padding: '4px 10px', borderRadius: '99px', background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                                     <XCircle className="h-3.5 w-3.5 text-red-600" /> Declined
                                   </span>
@@ -2425,96 +2741,192 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
             )}
 
             {/* ════════════════ STAGE 5: SHORTLISTING ════════════════ */}
-            {activeTab === 'stage-5' && (
-              <div className="rec-card" style={{ padding: '1.5rem' }}>
-                <h2 className="rec-section-title" style={{ marginBottom: '0.5rem' }}>Stage 5: Review & Shortlist Candidates</h2>
-                <p className="rec-section-sub" style={{ marginBottom: '1.5rem' }}>Compare suitability scores and approve profiles for interview coordination</p>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
-                  {candidates.filter(c => c.stage === 'AI Screening' || c.stage === 'Shortlisting').length === 0 ? (
-                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '3rem', background: '#f8fafc', borderRadius: '1rem', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: '0.75rem' }}>
-                      No candidates currently in shortlisting evaluation pool. Evaluate applicants using AI Match first in Stage 4.
-                    </div>
-                  ) : (
-                    candidates.filter(c => c.stage === 'AI Screening' || c.stage === 'Shortlisting').map(c => (
-                      <div key={c.id} style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '1rem', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div>
-                            <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a' }}>{c.firstName} {c.lastName}</h3>
-                            <p style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 600, marginTop: '0.125rem' }}>{c.jobTitle}</p>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                            <span style={{ fontSize: '0.95rem', fontWeight: 900, color: '#059669', fontFamily: 'monospace', background: '#ecfdf5', padding: '2px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
-                              #{getCandidateCode(c)}
-                            </span>
-                            <span style={{ fontSize: '0.55rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginTop: '2px' }}>Candidate ID</span>
-                          </div>
-                        </div>
+            {activeTab === 'stage-5' && (() => {
+              const map = new Map<string, Candidate>();
+              // 1. candidates from state (stage is Shortlisting, AI Screening, or accepted in statuses)
+              candidates.forEach(c => {
+                const emailKey = (c.email || '').toLowerCase();
+                const isAccepted = formApplicantStatuses[c.email] === 'accepted' || 
+                  formApplicantStatuses[c.id] === 'accepted' || 
+                  (emailKey && formApplicantStatuses[emailKey] === 'accepted');
+                if (c.stage === 'Shortlisting' || c.stage === 'AI Screening' || isAccepted) {
+                  const key = emailKey || c.id;
+                  map.set(key, {
+                    ...c,
+                    stage: c.stage === 'AI Screening' ? 'AI Screening' : 'Shortlisting'
+                  });
+                }
+              });
 
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#f8fafc', padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.7rem' }}>
-                          <div><span style={{ color: '#94a3b8' }}>Exp/Qual:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.experience}</span></div>
-                          <div><span style={{ color: '#94a3b8' }}>Source:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.source}</span></div>
-                          {c.phone && <div><span style={{ color: '#94a3b8' }}>Phone:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.phone}</span></div>}
-                          {c.location && <div><span style={{ color: '#94a3b8' }}>Location:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.location}</span></div>}
-                        </div>
+              // 2. stored shortlisted candidates from localStorage
+              const storedShortlisted = getStoredShortlistedCandidates();
+              storedShortlisted.forEach(sc => {
+                const key = (sc.email || sc.id).toLowerCase();
+                if (!map.has(key)) {
+                  map.set(key, { ...sc, stage: 'Shortlisting' });
+                }
+              });
 
-                        {c.resumeUrl && (
-                          <div style={{ fontSize: '0.68rem' }}>
-                            <a 
-                              href={c.resumeUrl} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              style={{ color: '#2563eb', fontWeight: 700, textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              <ExternalLink className="h-3 w-3" /> View Resume Link
-                            </a>
-                          </div>
-                        )}
+              // 3. live sheet responses that are accepted
+              liveSheetResponses.forEach(r => {
+                if (r.email) {
+                  const emailKey = r.email.toLowerCase();
+                  const isAccepted = formApplicantStatuses[r.email] === 'accepted' || 
+                    formApplicantStatuses[r.id] === 'accepted' || 
+                    formApplicantStatuses[emailKey] === 'accepted';
+                  if (isAccepted && !map.has(emailKey)) {
+                    const nameParts = (r.fullName || 'Applicant').split(' ');
+                    map.set(emailKey, {
+                      id: r.id || `cand-live-${r.email}`,
+                      firstName: nameParts[0] || 'Applicant',
+                      lastName: nameParts.slice(1).join(' ') || '',
+                      email: r.email,
+                      phone: r.mobile || 'N/A',
+                      location: r.location || 'WNP',
+                      experience: r.qualification || 'Degree',
+                      graduationYear: r.graduationYear || '-',
+                      appliedDate: r.timestamp || '24/08/2026 10:58:33',
+                      resumeUrl: r.resumeLink,
+                      attachmentImages: r.resumeLink ? [r.resumeLink] : [],
+                      source: 'Google Form',
+                      jobTitle: 'Google Form Recruitment',
+                      stage: 'Shortlisting',
+                      matchScore: 85,
+                      skills: ['Google Form', r.qualification || 'Degree'],
+                      avatarColor: 'bg-emerald-100 text-emerald-600 border-emerald-200'
+                    });
+                  }
+                }
+              });
 
-                        <div>
-                          <p style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>Skills Fit</p>
-                          <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
-                            {c.skills.map(sk => (
-                              <span key={sk} style={{ fontSize: '0.6rem', padding: '2px 6px', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: '4px', fontWeight: 700 }}>{sk}</span>
-                            ))}
-                          </div>
-                        </div>
+              // 4. default fallback rows that are accepted
+              DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+                const emailKey = fb.email.toLowerCase();
+                const isAccepted = formApplicantStatuses[fb.email] === 'accepted' || 
+                  formApplicantStatuses[fb.id] === 'accepted' || 
+                  formApplicantStatuses[emailKey] === 'accepted';
+                if (isAccepted && !map.has(emailKey)) {
+                  map.set(emailKey, {
+                    id: fb.id,
+                    firstName: fb.firstName,
+                    lastName: fb.lastName,
+                    email: fb.email,
+                    phone: fb.phone,
+                    location: fb.location,
+                    experience: fb.experience,
+                    graduationYear: fb.graduationYear,
+                    appliedDate: fb.appliedDate,
+                    resumeUrl: fb.resumeUrl,
+                    attachmentImages: fb.resumeUrl ? [fb.resumeUrl] : [],
+                    source: fb.source,
+                    jobTitle: fb.jobTitle,
+                    stage: 'Shortlisting',
+                    matchScore: 85,
+                    skills: ['Google Form', fb.experience || 'Degree'],
+                    avatarColor: 'bg-emerald-100 text-emerald-600 border-emerald-200'
+                  });
+                }
+              });
 
-                        <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto', paddingTop: '0.5rem' }}>
-                          <button 
-                            onClick={() => handleDeclineFormApplicant(c)} 
-                            className="rec-btn-outline" 
-                            style={{ flex: 1, fontSize: '0.7rem', color: '#ef4444', borderColor: '#fee2e2', background: '#fef2f2', height: '32px', padding: '0' }}
-                          >
-                            Reject
-                          </button>
-                          {c.stage !== 'Shortlisting' ? (
-                            <button 
-                              onClick={() => updateCandidateStage(c.id, 'Shortlisting')} 
-                              className="rec-btn-primary" 
-                              style={{ flex: 1, fontSize: '0.7rem', height: '32px', padding: '0', justifyContent: 'center' }}
-                            >
-                              Approve Shortlist
-                            </button>
-                          ) : (
-                            <button 
-                              onClick={() => {
-                                setSelectedCandidate(c);
-                                setActiveTab('stage-6');
-                              }} 
-                              className="rec-btn-primary" 
-                              style={{ flex: 1, fontSize: '0.7rem', height: '32px', padding: '0', justifyContent: 'center', background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
-                            >
-                              Schedule Interview
-                            </button>
-                          )}
-                        </div>
+              const shortlistCandidates = Array.from(map.values()).filter(c => {
+                const emailKey = (c.email || '').toLowerCase();
+                const isDeclined = formApplicantStatuses[c.email] === 'declined' || 
+                  formApplicantStatuses[c.id] === 'declined' || 
+                  (emailKey && formApplicantStatuses[emailKey] === 'declined');
+                return !isDeclined && c.stage !== 'Rejected';
+              });
+
+              return (
+                <div className="rec-card" style={{ padding: '1.5rem' }}>
+                  <h2 className="rec-section-title" style={{ marginBottom: '0.5rem' }}>Stage 5: Review & Shortlist Candidates</h2>
+                  <p className="rec-section-sub" style={{ marginBottom: '1.5rem' }}>Compare suitability scores and approve profiles for interview coordination</p>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1rem' }}>
+                    {shortlistCandidates.length === 0 ? (
+                      <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '3rem', background: '#f8fafc', borderRadius: '1rem', border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: '0.75rem' }}>
+                        No candidates currently in shortlisting evaluation pool. Evaluate applicants using AI Match first in Stage 4.
                       </div>
-                    ))
-                  )}
+                    ) : (
+                      shortlistCandidates.map(c => (
+                        <div key={c.id} style={{ background: '#fff', border: '1.5px solid #e2e8f0', borderRadius: '1rem', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a' }}>{c.firstName} {c.lastName}</h3>
+                              <p style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 600, marginTop: '0.125rem' }}>{c.jobTitle}</p>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                              <span style={{ fontSize: '0.95rem', fontWeight: 900, color: '#059669', fontFamily: 'monospace', background: '#ecfdf5', padding: '2px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                                #{getCandidateCode(c)}
+                              </span>
+                              <span style={{ fontSize: '0.55rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginTop: '2px' }}>Candidate ID</span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#f8fafc', padding: '0.5rem 0.75rem', borderRadius: '0.5rem', fontSize: '0.7rem' }}>
+                            <div><span style={{ color: '#94a3b8' }}>Exp/Qual:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.experience}</span></div>
+                            <div><span style={{ color: '#94a3b8' }}>Source:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.source}</span></div>
+                            {c.phone && <div><span style={{ color: '#94a3b8' }}>Phone:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.phone}</span></div>}
+                            {c.location && <div><span style={{ color: '#94a3b8' }}>Location:</span> <span style={{ fontWeight: 700, color: '#475569' }}>{c.location}</span></div>}
+                          </div>
+
+                          {c.resumeUrl && (
+                            <div style={{ fontSize: '0.68rem' }}>
+                              <a 
+                                href={c.resumeUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                style={{ color: '#2563eb', fontWeight: 700, textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <ExternalLink className="h-3 w-3" /> View Resume Link
+                              </a>
+                            </div>
+                          )}
+
+                          <div>
+                            <p style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>Skills Fit</p>
+                            <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+                              {c.skills.map(sk => (
+                                <span key={sk} style={{ fontSize: '0.6rem', padding: '2px 6px', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: '4px', fontWeight: 700 }}>{sk}</span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '0.5rem', marginTop: 'auto', paddingTop: '0.5rem' }}>
+                            <button 
+                              onClick={() => handleDeclineFormApplicant(c)} 
+                              className="rec-btn-outline" 
+                              style={{ flex: 1, fontSize: '0.7rem', color: '#ef4444', borderColor: '#fee2e2', background: '#fef2f2', height: '32px', padding: '0' }}
+                            >
+                              Reject
+                            </button>
+                            {c.stage !== 'Shortlisting' ? (
+                              <button 
+                                onClick={() => updateCandidateStage(c.id, 'Shortlisting')} 
+                                className="rec-btn-primary" 
+                                style={{ flex: 1, fontSize: '0.7rem', height: '32px', padding: '0', justifyContent: 'center' }}
+                              >
+                                Approve Shortlist
+                              </button>
+                            ) : (
+                              <button 
+                                onClick={() => {
+                                  setSelectedCandidate(c);
+                                  setActiveTab('stage-6');
+                                }} 
+                                className="rec-btn-primary" 
+                                style={{ flex: 1, fontSize: '0.7rem', height: '32px', padding: '0', justifyContent: 'center', background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
+                              >
+                                Schedule Interview
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ════════════════ STAGE 6: INTERVIEWS (ULTRA-PREMIUM UI) ════════════════ */}
             {activeTab === 'stage-6' && (
@@ -3417,7 +3829,13 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                       </div>
                     ) : (
                       candidates.filter(c => c.stage === 'Documents').map(c => {
-                        const formAtts = (c.attachmentImages || []).map((att, idx) => parseAttachmentItem(att, idx));
+                        const code = getCandidateCode(c);
+                        const storedDocs = getStoredCandidateDocs(c.id, c.email, code);
+                        const combinedImages = [...(c.attachmentImages || [])];
+                        storedDocs.forEach(d => {
+                          if (!combinedImages.includes(d)) combinedImages.push(d);
+                        });
+                        const formAtts = combinedImages.map((att, idx) => parseAttachmentItem(att, idx));
 
                         return (
                           <div key={c.id} style={{ background: '#ffffff', border: '1.5px solid #e2e8f0', borderRadius: '1.15rem', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', boxShadow: '0 4px 15px rgba(15, 23, 42, 0.03)' }}>
@@ -3429,7 +3847,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                 </div>
                                 <div>
                                   <h3 style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>{c.firstName} {c.lastName}</h3>
-                                  <p style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, margin: '2px 0 0 0' }}>{c.jobTitle} · #{getCandidateCode(c)}</p>
+                                  <p style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, margin: '2px 0 0 0' }}>{c.jobTitle} · #{code}</p>
                                 </div>
                               </div>
                               <span style={{ fontSize: '0.62rem', fontWeight: 800, padding: '3px 8px', borderRadius: '99px', background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe' }}>
@@ -3439,95 +3857,105 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
                             {/* Google Form Attachments List (If candidate has form uploads) */}
                             <div style={{ background: '#f8fafc', borderRadius: '0.85rem', padding: '0.85rem', border: '1px solid #e2e8f0' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
                                 <p style={{ fontSize: '0.72rem', fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                   <FileText className="h-4 w-4 text-emerald-600" /> Submitted Google Form Attachments ({formAtts.length})
                                 </p>
-                                {formAtts.length > 0 && (
-                                  <span style={{ fontSize: '0.6rem', color: '#059669', fontWeight: 800, background: '#dcfce7', padding: '1px 6px', borderRadius: '4px' }}>
-                                    Synced
-                                  </span>
-                                )}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  {formAtts.length > 0 && (
+                                    <span style={{ fontSize: '0.6rem', color: '#059669', fontWeight: 800, background: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}>
+                                      Synced
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDriveUploadModal({
+                                        candidateId: c.id,
+                                        candidateName: `${c.firstName} ${c.lastName}`.trim(),
+                                        candidateEmail: c.email,
+                                        candidateCode: code,
+                                        docType: 'Additional Document',
+                                        docField: 'additional'
+                                      });
+                                      setDriveDocTitleInput('Google Drive Document');
+                                      setDriveLinkInput('');
+                                    }}
+                                    className="rec-btn-outline"
+                                    style={{ fontSize: '0.62rem', height: '24px', padding: '0 8px', gap: '4px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 700 }}
+                                    title="Add any document via Google Drive shareable link"
+                                  >
+                                    <Plus className="h-3 w-3" /> Add Drive Link
+                                  </button>
+                                </div>
                               </div>
 
                               {formAtts.length === 0 ? (
                                 <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: 0, fontStyle: 'italic' }}>
-                                  No raw Google Form attachments attached. Use Google Form collector or upload scans below.
+                                  No raw Google Form attachments attached. Use Google Form collector or click "Add Drive Link" above.
                                 </p>
                               ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                  {formAtts.map((att, idx) => (
-                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', padding: '6px 10px', borderRadius: '0.5rem', border: '1px solid #cbd5e1' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                                        <FileText className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
-                                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                          {att.name || `Document ${idx + 1}`}
-                                        </span>
+                                  {formAtts.map((att, idx) => {
+                                    const displayName = (att.docType === 'Resume' || (!att.docField && idx === 0 && (att.url?.includes('resume') || att.name.includes('Doc_1')))) 
+                                      ? 'Submitted Resume (Google Form)' 
+                                      : (att.name || `Document ${idx + 1}`);
+
+                                    return (
+                                      <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ffffff', padding: '6px 10px', borderRadius: '0.5rem', border: '1px solid #cbd5e1', flexWrap: 'wrap', gap: '6px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', minWidth: '160px', flex: 1 }}>
+                                          <FileText className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
+                                          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {displayName}
+                                          </span>
+                                          {(att.driveId || att.url?.includes('drive.google.com')) && (
+                                            <span style={{ fontSize: '0.58rem', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '4px', fontWeight: 800, flexShrink: 0 }}>
+                                              Drive
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => setPreviewMediaAttachment({ ...att, name: displayName })}
+                                            className="rec-btn-outline"
+                                            style={{ fontSize: '0.68rem', height: '26px', padding: '0 8px', gap: '4px', color: '#4f46e5', borderColor: '#c7d2fe', fontWeight: 700 }}
+                                            title="View and inspect document in viewer"
+                                          >
+                                            <Eye className="h-3 w-3" /> View Document
+                                          </button>
+                                          {(att.driveId || att.url?.includes('drive.google.com') || att.url?.startsWith('http')) && (
+                                            <a
+                                              href={att.originalUrl || att.url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="rec-btn-outline"
+                                              style={{ fontSize: '0.68rem', height: '26px', padding: '0 8px', gap: '4px', color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff', fontWeight: 700, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+                                              title="Open link in Google Drive tab"
+                                            >
+                                              <ExternalLink className="h-3 w-3" /> Open Link ↗
+                                            </a>
+                                          )}
+                                          {att.docField && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteDoc(c.id, c.email, att.id || att.url)}
+                                              className="rec-icon-btn"
+                                              style={{ width: 24, height: 24, borderRadius: '4px', color: '#94a3b8', border: '1px solid #e2e8f0' }}
+                                              title="Remove this attached document"
+                                            >
+                                              <X className="h-3 w-3" />
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => setPreviewMediaAttachment(att)}
-                                        className="rec-btn-outline"
-                                        style={{ fontSize: '0.68rem', height: '26px', padding: '0 8px', gap: '4px', color: '#4f46e5', borderColor: '#c7d2fe', fontWeight: 700 }}
-                                      >
-                                        <Eye className="h-3 w-3" /> View Document
-                                      </button>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
 
-                            {/* Required Verification Document Scans List */}
-                            <div>
-                              <p style={{ fontSize: '0.75rem', fontWeight: 800, color: '#334155', marginBottom: '0.65rem' }}>Credential Verification Checklist</p>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                                {[
-                                  { type: 'Govt Identity Proof (Aadhaar/Passport)', field: 'identity' },
-                                  { type: 'Work Experience Certificate', field: 'work' },
-                                  { type: 'Highest Education Proof', field: 'edu' },
-                                ].map((doc, idx) => {
-                                  const uploaded = (c.attachmentImages && c.attachmentImages.length > idx) || formAtts.length > idx;
-                                  return (
-                                    <div key={doc.field} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 0.85rem', background: uploaded ? '#f0fdf4' : '#f8fafc', borderRadius: '0.65rem', border: `1px solid ${uploaded ? '#bbf7d0' : '#e2e8f0'}` }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                                        <FileText className="h-4 w-4 text-indigo-600" />
-                                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#1e293b' }}>{doc.type}</span>
-                                      </div>
-                                      <div>
-                                        {uploaded ? (
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                            <span style={{ fontSize: '0.68rem', color: '#15803d', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '3px' }}>
-                                              <CheckCircle className="h-4 w-4 text-emerald-600" /> Uploaded
-                                            </span>
-                                            <button
-                                              onClick={() => {
-                                                if (formAtts[idx]) setPreviewMediaAttachment(formAtts[idx]);
-                                                else setSelectedCandidate(c);
-                                              }}
-                                              className="rec-icon-btn"
-                                              style={{ width: 28, height: 28, borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                                              title="View Document"
-                                            >
-                                              <Eye className="h-3.5 w-3.5 text-slate-600" />
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <button
-                                            disabled={uploadingDocType !== null}
-                                            onClick={() => handleUploadMockDoc(c.id, doc.type)}
-                                            className="rec-btn-outline"
-                                            style={{ fontSize: '0.68rem', height: '28px', padding: '0 10px', fontWeight: 700 }}
-                                          >
-                                            {uploadingDocType === doc.type ? 'Uploading...' : 'Upload Scan'}
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
+
 
                             {/* Verification Footer Action */}
                             <div>
@@ -3712,26 +4140,21 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                 }
               });
 
-              // Fallback applicants from screenshots if empty
-              const defaultFallbackRows = [
-                { id: 'cand-shiva-1', firstName: 'Shiva', lastName: 'Prasad', email: 'shivaram33987@gmail.com', phone: '9949020175', location: 'WNP', experience: 'Degree', graduationYear: '-', appliedDate: '24/08/2026 10:58:33', resumeUrl: 'https://drive.google.com/open?id=1KHGMjppH53O9yfI9Wj0fmUpOAjjytA7z', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
-                { id: 'cand-shiva-2', firstName: 'k shiva', lastName: 'prasad', email: 'Kshivaprasad33987@gmail.com', phone: '9874563110', location: 'HYD', experience: '-', graduationYear: '2000', appliedDate: '24/08/2026 11:20:19', resumeUrl: 'https://drive.google.com/open?id=1D4woFQ3G9YX5TVcYc_dH9L5wF7UlS_0P', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
-                { id: 'cand-shiva-3', firstName: 'kanapuram Shiva', lastName: 'prasad', email: 'shivaram33987@gmail.com', phone: '9874920175', location: 'WNP', experience: 'BTECH', graduationYear: '-', appliedDate: '24/08/2026 12:58:39', resumeUrl: 'https://drive.google.com/open?id=1mDWuhRDVf4WvyNmNyknoMCVaeyNnGtr', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
-                { id: 'cand-shiva-4', firstName: 'Kiran', lastName: 'Prasad', email: 'kiranprasad@gmail.com', phone: '9876543210', location: 'HYD', experience: 'Degree', graduationYear: '-', appliedDate: '24/08/2026 13:10:05', resumeUrl: 'https://drive.google.com/open?id=1Pg2F6ko5VpMxxuOvax4SkPWn4byjWYE5', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
-                { id: 'cand-shiva-5', firstName: 'Shivaram', lastName: 'Prasad', email: 'shivaram.npl@gmail.com', phone: '9876543211', location: 'NPL', experience: 'MCA', graduationYear: '-', appliedDate: '24/08/2026 14:05:12', resumeUrl: 'https://drive.google.com/open?id=1sqyM3VU6rNhKi-C2mivbkCx53FVg0t7-', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
-                { id: 'cand-shiva-6', firstName: 'Karthik', lastName: 'Naidu', email: 'karthiknaidu@gmail.com', phone: '9908915698', location: 'Wanaparthy', experience: 'Degree', graduationYear: '2026', appliedDate: '24/08/2026 15:20:44', resumeUrl: 'https://drive.google.com/open?id=1sfCrweVTjS0zSMpCGxM_J0v4n73v8Dxa', source: 'Google Form', jobTitle: 'Google Form Recruitment' }
-              ];
-
-              defaultFallbackRows.forEach(fb => {
-                if (!map.has(fb.email) && !map.has(fb.id)) {
-                  const isAccepted = formApplicantStatuses[fb.email] === 'accepted';
-                  const isDeclined = formApplicantStatuses[fb.email] === 'declined';
+              DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+                const emailKey = fb.email.toLowerCase();
+                if (!map.has(fb.email) && !map.has(fb.id) && !map.has(emailKey)) {
+                  const isAccepted = formApplicantStatuses[fb.email] === 'accepted' || 
+                    formApplicantStatuses[fb.id] === 'accepted' || 
+                    formApplicantStatuses[emailKey] === 'accepted';
+                  const isDeclined = formApplicantStatuses[fb.email] === 'declined' || 
+                    formApplicantStatuses[fb.id] === 'declined' || 
+                    formApplicantStatuses[emailKey] === 'declined';
                   map.set(fb.email, {
                     ...fb,
                     stage: isAccepted ? 'Shortlisting' : isDeclined ? 'Rejected' : 'Applications',
                     accepted: isAccepted,
                     declined: isDeclined,
-                    skills: ['Google Form']
+                    skills: ['Google Form', fb.experience || 'Degree']
                   });
                 }
               });
@@ -4289,7 +4712,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
 
 
-        {/* Light-box Image Preview Modal */}
+        {/* Document & Image Preview Modal (Supports Google Drive, PDF, Images) */}
         <AnimatePresence>
           {previewMediaAttachment && (
           <motion.div
@@ -4305,14 +4728,21 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               className="rec-modal"
-              style={{ maxWidth: '680px', padding: '1rem', background: '#0f172a', color: '#fff' }}
+              style={{ maxWidth: '850px', width: '94vw', padding: '1.25rem', background: '#0f172a', color: '#fff', borderRadius: '1rem' }}
               onClick={e => e.stopPropagation()}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '0.75rem', borderBottom: '1px solid #334155' }}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Eye className="h-4 w-4 text-purple-400" />
-                  {previewMediaAttachment.name}
-                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Eye className="h-4 w-4 text-emerald-400" />
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
+                    {previewMediaAttachment.name}
+                  </h3>
+                  {(previewMediaAttachment.driveId || previewMediaAttachment.url?.includes('drive.google.com')) && (
+                    <span style={{ fontSize: '0.62rem', background: '#0369a1', color: '#e0f2fe', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                      Google Drive Document
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => setPreviewMediaAttachment(null)}
                   style={{ background: 'none', border: 0, color: '#94a3b8', cursor: 'pointer', fontSize: '1.2rem' }}
@@ -4321,41 +4751,177 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                 </button>
               </div>
 
-              <div style={{ padding: '1rem 0', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '280px', maxHeight: '70vh' }}>
+              <div style={{ padding: '0.75rem 0', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '380px', maxHeight: '72vh', width: '100%' }}>
                 {previewMediaAttachment.error ? (
                   <div style={{ textAlign: 'center', color: '#f87171' }}>
                     <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-500" />
                     <p style={{ fontWeight: 600, fontSize: '0.85rem' }}>⚠️ File unavailable</p>
                   </div>
-                ) : (
+                ) : (previewMediaAttachment.driveId || (previewMediaAttachment.url && previewMediaAttachment.url.includes('drive.google.com')) || previewMediaAttachment.type === 'pdf') ? (
+                  <div style={{ width: '100%', height: '540px', display: 'flex', flexDirection: 'column' }}>
+                    <iframe
+                      src={previewMediaAttachment.previewUrl || (previewMediaAttachment.driveId ? `https://drive.google.com/file/d/${previewMediaAttachment.driveId}/preview` : previewMediaAttachment.url)}
+                      width="100%"
+                      height="100%"
+                      style={{ border: '1px solid #334155', borderRadius: '0.5rem', background: '#ffffff' }}
+                      title={previewMediaAttachment.name}
+                      allow="autoplay"
+                    />
+                  </div>
+                ) : (previewMediaAttachment.type === 'image' || previewMediaAttachment.url?.startsWith('data:image')) ? (
                   <img
                     src={previewMediaAttachment.url}
                     alt={previewMediaAttachment.name}
-                    style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: '0.5rem', border: '1px solid #334155' }}
+                    style={{ maxWidth: '100%', maxHeight: '65vh', objectFit: 'contain', borderRadius: '0.5rem', border: '1px solid #334155' }}
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
                   />
+                ) : (
+                  <iframe
+                    src={previewMediaAttachment.url}
+                    width="100%"
+                    height="500px"
+                    style={{ border: '1px solid #334155', borderRadius: '0.5rem', background: '#fff' }}
+                    title={previewMediaAttachment.name}
+                  />
                 )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #334155' }}>
-                <a
-                  href={previewMediaAttachment.downloadUrl || previewMediaAttachment.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download
-                  className="rec-btn-primary"
-                  style={{ fontSize: '0.75rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <Download className="h-4 w-4" /> Download Original
-                </a>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', paddingTop: '0.75rem', borderTop: '1px solid #334155', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {(previewMediaAttachment.driveId || previewMediaAttachment.url?.includes('drive.google.com') || previewMediaAttachment.url?.startsWith('http')) && (
+                    <a
+                      href={previewMediaAttachment.originalUrl || (previewMediaAttachment.driveId ? `https://drive.google.com/file/d/${previewMediaAttachment.driveId}/view` : previewMediaAttachment.url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rec-btn-primary"
+                      style={{ fontSize: '0.75rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#0284c7' }}
+                    >
+                      <ExternalLink className="h-4 w-4" /> Open in Google Drive ↗
+                    </a>
+                  )}
+                  {previewMediaAttachment.downloadUrl && (
+                    <a
+                      href={previewMediaAttachment.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      download
+                      className="rec-btn-outline"
+                      style={{ fontSize: '0.75rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#fff', borderColor: '#475569' }}
+                    >
+                      <Download className="h-4 w-4" /> Download
+                    </a>
+                  )}
+                </div>
                 <button
                   onClick={() => setPreviewMediaAttachment(null)}
                   className="rec-btn-outline"
                   style={{ fontSize: '0.75rem', color: '#fff', borderColor: '#475569' }}
                 >
                   Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Google Drive Link Document Upload Modal */}
+      <AnimatePresence>
+        {driveUploadModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="rec-modal-backdrop"
+            style={{ zIndex: 99999 }}
+            onClick={() => setDriveUploadModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="rec-modal"
+              style={{ maxWidth: '540px', width: '92vw', padding: '1.5rem', background: '#ffffff', color: '#1e293b', borderRadius: '1.25rem', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '1rem', borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 10px rgba(2, 132, 199, 0.3)' }}>
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                      Attach Google Drive Document
+                    </h3>
+                    <p style={{ fontSize: '0.72rem', color: '#64748b', margin: '2px 0 0 0' }}>
+                      Candidate: <strong>{driveUploadModal.candidateName}</strong>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDriveUploadModal(null)}
+                  style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer', borderRadius: '8px', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Form Body */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.25rem 0' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
+                    Document Name / Type
+                  </label>
+                  <input
+                    type="text"
+                    className="rec-search-input"
+                    style={{ width: '100%', height: '38px', paddingLeft: '0.75rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '0.8rem', color: '#0f172a' }}
+                    value={driveDocTitleInput}
+                    onChange={e => setDriveDocTitleInput(e.target.value)}
+                    placeholder="e.g. Govt Identity Proof, Degree Certificate, Experience Letter"
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
+                    Google Drive Shareable Link *
+                  </label>
+                  <input
+                    type="url"
+                    className="rec-search-input"
+                    style={{ width: '100%', height: '42px', paddingLeft: '0.75rem', background: '#f8fafc', border: '1.5px solid #0284c7', borderRadius: '8px', fontSize: '0.8rem', color: '#0f172a', fontFamily: 'monospace' }}
+                    value={driveLinkInput}
+                    onChange={e => setDriveLinkInput(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/.../view or https://drive.google.com/open?id=..."
+                  />
+                  <div style={{ marginTop: '8px', background: '#f0f9ff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bae6fd', fontSize: '0.7rem', color: '#0369a1', display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                    <ExternalLink className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                    <span>Please ensure Google Drive link sharing is set to <strong>"Anyone with the link can view"</strong> so recruiters and verifiers can view the document.</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions Footer */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '1rem', borderTop: '1px solid #f1f5f9' }}>
+                <button
+                  type="button"
+                  onClick={() => setDriveUploadModal(null)}
+                  className="rec-btn-outline"
+                  style={{ fontSize: '0.75rem', height: '36px', padding: '0 14px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={savingDriveLink || !driveLinkInput.trim()}
+                  onClick={handleSaveDriveLink}
+                  className="rec-btn-primary"
+                  style={{ fontSize: '0.75rem', height: '36px', padding: '0 16px', background: '#0284c7', borderColor: '#0369a1', gap: '6px' }}
+                >
+                  {savingDriveLink ? 'Attaching...' : 'Attach Google Drive Document'}
                 </button>
               </div>
             </motion.div>

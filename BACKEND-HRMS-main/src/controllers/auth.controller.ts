@@ -153,9 +153,15 @@ export const authController = {
         </div>
       `;
       
-      const { notificationService } = await import('../services/notification.service');
-      await notificationService.sendEmail(user.email, 'HRMS Password Reset', emailHtml);
+      // Log generated reset link to console for immediate operational fallback in server logs
+      console.log(`[PASSWORD RESET LINK GENERATED] Target: ${user.email} | Link: ${resetLink}`)
 
+      try {
+        const { notificationService } = await import('../services/notification.service')
+        await notificationService.sendEmail(user.email, 'HRMS Password Reset', emailHtml)
+      } catch (emailError: any) {
+        console.error(`[PASSWORD RESET EMAIL WARNING] Could not send email to ${user.email}:`, emailError.message)
+      }
 
       return sendSuccess(res, null, 'If that account exists, a reset link has been sent.')
     } catch (error: any) {
