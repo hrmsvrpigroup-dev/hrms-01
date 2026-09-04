@@ -44,8 +44,8 @@ export const employeeApi = {
   }) => api.post<{ success: boolean; data: Employee }>('/employees', data),
   delete: (id: string) => api.delete<{ success: boolean; data: any }>(`/employees/${id}`),
   getProfile: () => api.get<{ success: boolean; data: any }>('/employees/me'),
-  updateSignature: (signature: string) => api.put<{ success: boolean; data: { signature: string } }>('/employees/me/signature', { signature }),
-  updatePhoto: (photo: string) => api.put<{ success: boolean; data: { photo: string } }>('/employees/me/photo', { photo }),
+  updateSignature: (signature: string) => api.put<{ success: boolean; data: { signature: string; signatureUploadCount?: number } }>('/employees/me/signature', { signature }),
+  updatePhoto: (photo: string) => api.put<{ success: boolean; data: { photo: string; photoUploadCount?: number } }>('/employees/me/photo', { photo }),
   getById: (id: string) => api.get<{ success: boolean; data: any }>(`/employees/${id}`),
   update: (id: string, formData: FormData) => api.put<{ success: boolean; data: any }>(`/employees/${id}`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }

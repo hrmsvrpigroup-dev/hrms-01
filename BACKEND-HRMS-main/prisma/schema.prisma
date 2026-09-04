@@ -144,7 +144,9 @@ model Employee {
   bloodGroup     String?
   address        String?
   photo          String?
+  photoUploadCount Int             @default(0)
   signature      String?         @db.Text
+  signatureUploadCount Int         @default(0)
   departmentId   String?
   designationId  String?
   managerId      String?
@@ -847,6 +849,8 @@ model EmployeePayrollDetails {
   ifscCode       String?
   panNumber      String?
   uanNumber      String?
+  monthlySalary  Float?
+  pfAmount       Float?
   pfEnabled      Boolean  @default(false)
   esiEnabled     Boolean  @default(false)
   createdAt      DateTime @default(now())

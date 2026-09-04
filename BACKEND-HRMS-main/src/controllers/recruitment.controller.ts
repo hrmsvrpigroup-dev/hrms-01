@@ -370,7 +370,7 @@ export const recruitmentController = {
       if (offerStatus) {
         updateData.offerStatus = offerStatus
         if (offerStatus === 'ACCEPTED') {
-          updateData.status = 'DOCUMENTS'
+          updateData.status = 'HIRED'
         }
       }
 
@@ -406,7 +406,7 @@ export const recruitmentController = {
         where: { id },
         data: {
           documentsVerified: !!verified,
-          status: verified ? 'HIRED' : 'DOCUMENTS'
+          status: verified ? 'OFFER' : 'DOCUMENTS'
         }
       })
 

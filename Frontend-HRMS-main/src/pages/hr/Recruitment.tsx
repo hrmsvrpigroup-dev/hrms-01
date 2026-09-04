@@ -1421,11 +1421,15 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
   // Simulate Candidate Offer Acceptance
   const handleSimulateOfferAcceptance = async (candidateId: string) => {
     try {
-      await api.patch(`/recruitment/applications/${candidateId}/offer`, {
-        offerStatus: 'ACCEPTED'
-      });
-      alert('Candidate has ACCEPTED the offer! Moving candidate to Document Collection.');
+      setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, stage: 'Onboarding', offerStatus: 'ACCEPTED' } : c));
+      if (candidateId && !candidateId.startsWith('cand-')) {
+        await api.patch(`/recruitment/applications/${candidateId}/offer`, {
+          offerStatus: 'ACCEPTED'
+        });
+      }
+      alert('Candidate has ACCEPTED the offer! Moving candidate to Employee Onboarding.');
       await loadRecruitmentData();
+      setActiveTab('stage-9');
     } catch (err) {
       alert('Failed to accept offer.');
     }
@@ -1661,12 +1665,15 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
   // Verify and Approve Candidate Documents
   const handleVerifyDocumentsSubmit = async (candidateId: string) => {
     try {
-      await api.patch(`/recruitment/applications/${candidateId}/documents-verify`, {
-        verified: true
-      });
-      alert('Documents verified and approved! Candidate is now HIRED. Moving to Onboarding.');
+      setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, stage: 'Offer', documentsVerified: true } : c));
+      if (candidateId && !candidateId.startsWith('cand-')) {
+        await api.patch(`/recruitment/applications/${candidateId}/documents-verify`, {
+          verified: true
+        });
+      }
+      alert('Documents verified and approved! Moving candidate to Offer stage.');
       await loadRecruitmentData();
-      setActiveTab('stage-9');
+      setActiveTab('stage-7');
     } catch (err) {
       alert('Failed to verify documents.');
     }
@@ -3976,7 +3983,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                 <UserCheck className="h-4.5 w-4.5" /> Verify & Approve Candidate Credentials
                               </button>
                               <p style={{ fontSize: '0.65rem', color: '#64748b', textAlign: 'center', marginTop: '6px', margin: '6px 0 0 0' }}>
-                                Approving candidate credentials will transition profile to Stage 9: Employee Onboarding
+                                Approving candidate credentials will transition profile to Stage 5: Offer Letter
                               </p>
                             </div>
                           </div>

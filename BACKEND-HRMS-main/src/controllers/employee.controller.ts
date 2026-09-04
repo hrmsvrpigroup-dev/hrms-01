@@ -54,19 +54,34 @@ export const employeeController = {
     try {
       const existingEmployee = await prisma.employee.findUnique({
         where: { userId },
-        select: { signature: true }
+        select: { id: true, signature: true, signatureUploadCount: true }
       })
 
-      if (existingEmployee?.signature) {
-        return sendError(res, 'Signature has already been uploaded and cannot be changed.', 400)
+      if (!existingEmployee) {
+        return sendError(res, 'Employee not found', 404)
+      }
+
+      let currentCount = existingEmployee.signatureUploadCount ?? 0
+      if (currentCount === 0 && existingEmployee.signature) {
+        currentCount = 1
+      }
+
+      if (currentCount >= 2) {
+        return sendError(res, 'Signature upload limit reached. You can only upload your signature up to 2 times.', 400)
       }
 
       const updatedEmployee = await prisma.employee.update({
         where: { userId },
-        data: { signature }
+        data: { 
+          signature,
+          signatureUploadCount: currentCount + 1
+        }
       })
 
-      return sendSuccess(res, { signature: updatedEmployee.signature })
+      return sendSuccess(res, { 
+        signature: updatedEmployee.signature,
+        signatureUploadCount: updatedEmployee.signatureUploadCount
+      })
     } catch (error: any) {
       return sendError(res, error.message || 'Failed to update signature', 500)
     }
@@ -87,19 +102,34 @@ export const employeeController = {
     try {
       const existingEmployee = await prisma.employee.findUnique({
         where: { userId },
-        select: { photo: true }
+        select: { id: true, photo: true, photoUploadCount: true }
       })
 
-      if (existingEmployee?.photo) {
-        return sendError(res, 'Photo has already been uploaded and cannot be changed.', 400)
+      if (!existingEmployee) {
+        return sendError(res, 'Employee not found', 404)
+      }
+
+      let currentCount = existingEmployee.photoUploadCount ?? 0
+      if (currentCount === 0 && existingEmployee.photo) {
+        currentCount = 1
+      }
+
+      if (currentCount >= 2) {
+        return sendError(res, 'Photo upload limit reached. You can only upload your photo up to 2 times.', 400)
       }
 
       const updatedEmployee = await prisma.employee.update({
         where: { userId },
-        data: { photo }
+        data: { 
+          photo,
+          photoUploadCount: currentCount + 1
+        }
       })
 
-      return sendSuccess(res, { photo: updatedEmployee.photo })
+      return sendSuccess(res, { 
+        photo: updatedEmployee.photo,
+        photoUploadCount: updatedEmployee.photoUploadCount
+      })
     } catch (error: any) {
       return sendError(res, error.message || 'Failed to update photo', 500)
     }

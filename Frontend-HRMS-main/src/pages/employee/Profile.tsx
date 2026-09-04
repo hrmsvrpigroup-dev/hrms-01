@@ -128,6 +128,12 @@ export default function Profile() {
     }
   }
 
+  const photoUploadsUsed = employeeDetails?.photoUploadCount ?? (employeeDetails?.photo ? 1 : 0)
+  const canUploadPhoto = photoUploadsUsed < 2
+
+  const signatureUploadsUsed = employeeDetails?.signatureUploadCount ?? (employeeDetails?.signature ? 1 : 0)
+  const canUploadSignature = signatureUploadsUsed < 2
+
   const handleSignatureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -139,12 +145,18 @@ export default function Profile() {
       const base64String = reader.result as string
       try {
         setIsUploading(true)
-        await employeeApi.updateSignature(base64String)
-        setEmployeeDetails((prev: any) => ({ ...prev, signature: base64String }))
+        const res = await employeeApi.updateSignature(base64String)
+        const updatedCount = res.data?.data?.signatureUploadCount ?? (signatureUploadsUsed + 1)
+        setEmployeeDetails((prev: any) => ({
+          ...prev,
+          signature: res.data?.data?.signature || base64String,
+          signatureUploadCount: updatedCount,
+        }))
         triggerHrNotification(`Employee ${fullName} updated their digital signature.`)
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to upload signature', error)
-        alert('Failed to upload signature. Please try again.')
+        const msg = error.response?.data?.message || 'Failed to upload signature. Please try again.'
+        alert(msg)
       } finally {
         setIsUploading(false)
       }
@@ -161,12 +173,18 @@ export default function Profile() {
       const base64String = reader.result as string
       try {
         setIsUploading(true)
-        await employeeApi.updatePhoto(base64String)
-        setEmployeeDetails((prev: any) => ({ ...prev, photo: base64String }))
+        const res = await employeeApi.updatePhoto(base64String)
+        const updatedCount = res.data?.data?.photoUploadCount ?? (photoUploadsUsed + 1)
+        setEmployeeDetails((prev: any) => ({
+          ...prev,
+          photo: res.data?.data?.photo || base64String,
+          photoUploadCount: updatedCount,
+        }))
         triggerHrNotification(`Employee ${fullName} updated their profile photo.`)
-      } catch (error) {
+      } catch (error: any) {
         console.error('Failed to upload photo', error)
-        alert('Failed to upload photo. Please try again.')
+        const msg = error.response?.data?.message || 'Failed to upload photo. Please try again.'
+        alert(msg)
       } finally {
         setIsUploading(false)
       }
@@ -181,13 +199,9 @@ export default function Profile() {
     <div className="profile-page">
       <div className="profile-header-banner">
         <div className="profile-banner-left">
-          {employeeDetails?.photo ? (
-            <div className="profile-avatar-large" style={{ position: 'relative', cursor: 'default' }}>
-              <img src={employeeDetails.photo} alt="User" />
-            </div>
-          ) : (
-            <label className="profile-avatar-large" style={{ cursor: 'pointer', position: 'relative' }}>
-              <img src={`https://ui-avatars.com/api/?name=${fullName}&background=3b82f6&color=fff&size=128`} alt="User" />
+          {canUploadPhoto ? (
+            <label className="profile-avatar-large" style={{ cursor: 'pointer', position: 'relative' }} title={`Click to upload photo (${2 - photoUploadsUsed} upload${2 - photoUploadsUsed === 1 ? '' : 's'} remaining)`}>
+              <img src={employeeDetails?.photo || `https://ui-avatars.com/api/?name=${fullName}&background=3b82f6&color=fff&size=128`} alt="User" />
               <input 
                 type="file" 
                 accept="image/png, image/jpeg" 
@@ -198,7 +212,13 @@ export default function Profile() {
               <div className="avatar-hover-overlay">
                 <Upload size={20} color="white" />
               </div>
+              <span className="upload-badge-tag">{photoUploadsUsed}/2 uploads</span>
             </label>
+          ) : (
+            <div className="profile-avatar-large" style={{ position: 'relative', cursor: 'default' }} title="Photo upload limit reached (2/2)">
+              <img src={employeeDetails?.photo || `https://ui-avatars.com/api/?name=${fullName}&background=3b82f6&color=fff&size=128`} alt="User" />
+              <span className="upload-badge-tag locked">2/2 locked</span>
+            </div>
           )}
           <div className="profile-header-text">
             <h2>{fullName}</h2>
@@ -489,15 +509,16 @@ export default function Profile() {
                   <p className="id-help-text">Please ensure all your personal details are accurate. Download your digital ID card to keep on your mobile device or print a physical copy.</p>
                   
                   <div className="action-buttons-row">
-                    {employeeDetails?.signature ? (
-                      <button type="button" className="btn-secondary" style={{ cursor: 'not-allowed', opacity: 0.8 }} disabled>
-                        <CheckCircle size={16} color="#10b981" />
-                        <span>Signature Uploaded</span>
-                      </button>
-                    ) : (
+                    {canUploadSignature ? (
                       <label className="btn-secondary" style={{ cursor: 'pointer' }}>
                         <Upload size={16} />
-                        <span>{isUploading ? 'Uploading...' : 'Upload Signature'}</span>
+                        <span>
+                          {isUploading 
+                            ? 'Uploading...' 
+                            : signatureUploadsUsed === 0 
+                              ? 'Upload Signature (2 left)' 
+                              : 'Update Signature (1 left)'}
+                        </span>
                         <input 
                           type="file" 
                           accept="image/png, image/jpeg" 
@@ -506,6 +527,11 @@ export default function Profile() {
                           disabled={isUploading}
                         />
                       </label>
+                    ) : (
+                      <button type="button" className="btn-secondary" style={{ cursor: 'not-allowed', opacity: 0.8 }} disabled title="Signature upload limit reached (2/2)">
+                        <CheckCircle size={16} color="#10b981" />
+                        <span>Signature Uploaded (2/2)</span>
+                      </button>
                     )}
 
                     <button type="button" className="btn-primary" onClick={downloadIdCard}>
@@ -580,6 +606,26 @@ export default function Profile() {
 
         .profile-avatar-large:hover .avatar-hover-overlay {
           opacity: 1;
+        }
+
+        .upload-badge-tag {
+          position: absolute;
+          bottom: -4px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #3b82f6;
+          color: white;
+          font-size: 0.62rem;
+          font-weight: 700;
+          padding: 2px 7px;
+          border-radius: 12px;
+          white-space: nowrap;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+          border: 1.5px solid rgba(255,255,255,0.6);
+        }
+
+        .upload-badge-tag.locked {
+          background: #64748b;
         }
 
         .profile-header-text h2 {
