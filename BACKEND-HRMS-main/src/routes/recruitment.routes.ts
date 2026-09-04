@@ -23,6 +23,7 @@ router.patch('/applications/:id/documents-verify', recruitmentController.verifyD
 router.post('/applications/:id/onboard', recruitmentController.initiateOnboarding)
 router.post('/applications/:id/attachments', recruitmentController.addAttachment)
 router.post('/applications/:id/attachments/remove', recruitmentController.removeAttachment)
+router.delete('/applications/:id', recruitmentController.deleteApplication)
 router.post('/sync-google-responses', recruitmentController.syncGoogleResponses)
 router.get('/files/drive-proxy', recruitmentController.driveProxy)
 

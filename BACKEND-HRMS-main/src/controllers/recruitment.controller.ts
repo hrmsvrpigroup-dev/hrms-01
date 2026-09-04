@@ -274,6 +274,32 @@ export const recruitmentController = {
     }
   },
 
+  // Delete Applicant / Application
+  async deleteApplication(req: AuthRequest, res: Response) {
+    try {
+      const { id } = req.params
+      const tenantId = req.tenantId ?? req.user?.tenantId
+      if (!tenantId) {
+        return sendError(res, 'Tenant context not found', 400)
+      }
+
+      const application = await prisma.jobApplication.findFirst({
+        where: { id, job: { tenantId } }
+      })
+      if (!application) {
+        return sendError(res, 'Application not found or unauthorized access', 404)
+      }
+
+      await prisma.jobApplication.delete({
+        where: { id }
+      })
+
+      return sendSuccess(res, null, 'Application deleted successfully')
+    } catch (error: any) {
+      return sendError(res, error.message || 'Failed to delete application', 500)
+    }
+  },
+
   // Stage 4: Run AI Screen on candidate
   async aiScreenCandidate(req: AuthRequest, res: Response) {
     try {
@@ -406,7 +432,7 @@ export const recruitmentController = {
         where: { id },
         data: {
           documentsVerified: !!verified,
-          status: verified ? 'OFFER' : 'DOCUMENTS'
+          status: verified ? 'CALL_LETTER' : 'DOCUMENTS'
         }
       })
 
