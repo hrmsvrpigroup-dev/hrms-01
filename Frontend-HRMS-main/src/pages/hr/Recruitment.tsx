@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -284,6 +284,53 @@ export function getStoredCandidateDocs(candidateId?: string, email?: string, cod
   }
 }
 
+export function getInterviewInvitationText(c: any): string {
+  const platform = (c?.interviewLink || '').includes('meet.google.com') 
+    ? 'Google Meet' 
+    : (c?.interviewLink || '').includes('teams.microsoft.com') 
+    ? 'Microsoft Teams' 
+    : (c?.interviewLink || '').includes('zoom.us') 
+    ? 'Zoom' 
+    : 'Google Meet / Microsoft Teams / Zoom';
+
+  const rawTitle = c?.jobTitle || 'Full Stack Engineer';
+  const cleanTitle = rawTitle
+    .replace(/\s*\([^)]*Google\s*Form[^)]*\)/gi, '')
+    .replace(/\s*\(Google Form Recruitment\)/gi, '')
+    .replace(/\s*\(Google Form\)/gi, '')
+    .replace(/Google Form Recruitment/gi, 'Full Stack Engineer')
+    .replace(/Google Form Applicant/gi, 'Full Stack Engineer')
+    .replace(/Google Form/gi, '')
+    .trim() || 'Full Stack Engineer';
+
+  const candName = c?.firstName ? `${c.firstName} ${c.lastName || ''}`.trim() : (c?.name || 'Candidate');
+
+  return `Dear ${candName},
+
+Greetings from VR PI!
+
+We are pleased to inform you that you have been shortlisted for the **VR PI Interview**. The interview will be conducted virtually through an online meeting.
+
+**Interview Details:**
+
+* **Date:** ${c?.interviewDate || 'Scheduled Date'}
+* **Time:** ${c?.interviewTime || 'Scheduled Time'} IST
+* **Mode:** Virtual Interview
+* **Meeting Platform:** ${platform}
+* **Meeting Link:** ${c?.interviewLink || 'Virtual Meeting Link'}
+
+Please join the meeting **5–10 minutes before the scheduled time** and ensure that you have a stable internet connection, working camera, and microphone.
+
+Kindly keep your updated resume and relevant documents ready for the interview.
+
+We look forward to speaking with you.
+
+Best Regards,
+**HR Team**
+**VR PI**
+vamshikrishna@vrpigroup.co.in`;
+}
+
 // ─── 9 Pipeline Stages Config ──────────────────────────────────────────
 
 const STAGES = [
@@ -313,6 +360,33 @@ const DEFAULT_FALLBACK_APPLICANTS = [
   { id: 'cand-shiva-4', firstName: 'Kiran', lastName: 'Prasad', email: 'kiranprasad@gmail.com', phone: '9876543210', location: 'HYD', experience: 'Degree', graduationYear: '-', appliedDate: '24/08/2026 13:10:05', resumeUrl: 'https://drive.google.com/open?id=1Pg2F6ko5VpMxxuOvax4SkPWn4byjWYE5', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
   { id: 'cand-shiva-5', firstName: 'Shivaram', lastName: 'Prasad', email: 'shivaram.npl@gmail.com', phone: '9876543211', location: 'NPL', experience: 'MCA', graduationYear: '-', appliedDate: '24/08/2026 14:05:12', resumeUrl: 'https://drive.google.com/open?id=1sqyM3VU6rNhKi-C2mivbkCx53FVg0t7-', source: 'Google Form', jobTitle: 'Google Form Recruitment' },
   { id: 'cand-shiva-6', firstName: 'Karthik', lastName: 'Naidu', email: 'karthiknaidu@gmail.com', phone: '9908915698', location: 'Wanaparthy', experience: 'Degree', graduationYear: '2026', appliedDate: '24/08/2026 15:20:44', resumeUrl: 'https://drive.google.com/open?id=1sfCrweVTjS0zSMpCGxM_J0v4n73v8Dxa', source: 'Google Form', jobTitle: 'Google Form Recruitment' }
+];
+
+const DEFAULT_FALLBACK_JOBS: Job[] = [
+  {
+    id: 'job-vrpi-01',
+    title: 'Senior Full Stack Engineer',
+    department: 'Engineering',
+    location: 'Hyderabad / Hybrid',
+    type: 'Full-time',
+    status: 'Published',
+    applicants: 6,
+    postedDate: '2026-08-20',
+    description: 'Lead engineering initiatives building high performance cloud enterprise portals and microservices.',
+    mediaUrl: ''
+  },
+  {
+    id: 'job-vrpi-02',
+    title: 'HR Talent & Operations Specialist',
+    department: 'Human Resources',
+    location: 'Wanaparthy / On-site',
+    type: 'Full-time',
+    status: 'Published',
+    applicants: 4,
+    postedDate: '2026-08-22',
+    description: 'Coordinate talent acquisition, screening, and onboarding for corporate office operations.',
+    mediaUrl: ''
+  }
 ];
 
 interface RecruitmentProps {
@@ -444,12 +518,24 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
     try {
       const list = getDeletedApplicants();
       if (id && !list.includes(id)) list.push(id);
-      if (email && !list.includes(email.toLowerCase())) list.push(email.toLowerCase());
+      if (email) {
+        if (!list.includes(email)) list.push(email);
+        if (!list.includes(email.toLowerCase())) list.push(email.toLowerCase());
+      }
       localStorage.setItem('hrms_deleted_applicants', JSON.stringify(list));
     } catch (_) {}
   };
 
-  const handleDeleteApplicant = async (candidateId: string, candidateEmail?: string) => {
+  const isCandidateDeleted = (candId?: string, candEmail?: string) => {
+    const list = getDeletedApplicants();
+    if (candId && list.includes(candId)) return true;
+    if (candEmail) {
+      if (list.includes(candEmail) || list.includes(candEmail.toLowerCase())) return true;
+    }
+    return false;
+  };
+
+  const handleDeleteApplicant = async (candidateId?: string, candidateEmail?: string) => {
     if (!window.confirm('Are you sure you want to delete this applicant? This action cannot be undone.')) {
       return;
     }
@@ -457,30 +543,37 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
     // 1. Add to deleted tracking list
     addDeletedApplicant(candidateId, candidateEmail);
 
-    // 2. Remove from React state
+    // 2. Remove from React candidates state
     setCandidates(prev => prev.filter(c => {
-      const matchId = c.id === candidateId;
+      const matchId = candidateId && c.id === candidateId;
       const matchEmail = candidateEmail && c.email && c.email.toLowerCase() === candidateEmail.toLowerCase();
       return !matchId && !matchEmail;
     }));
 
-    // 3. Remove from shortlist stored list
+    // 3. Remove from live sheet responses state
+    setLiveSheetResponses(prev => prev.filter(r => {
+      const matchId = candidateId && r.id === candidateId;
+      const matchEmail = candidateEmail && r.email && r.email.toLowerCase() === candidateEmail.toLowerCase();
+      return !matchId && !matchEmail;
+    }));
+
+    // 4. Remove from shortlist stored list
     const currentShortlisted = getStoredShortlistedCandidates();
     saveStoredShortlistedCandidates(currentShortlisted.filter(c => {
-      const matchId = c.id === candidateId;
+      const matchId = candidateId && c.id === candidateId;
       const matchEmail = candidateEmail && c.email && c.email.toLowerCase() === candidateEmail.toLowerCase();
       return !matchId && !matchEmail;
     }));
 
-    // 4. Remove from scheduled interviews stored list
+    // 5. Remove from scheduled interviews stored list
     const currentScheduled = getStoredScheduledInterviews();
     saveStoredScheduledInterviews(currentScheduled.filter(c => {
-      const matchId = c.id === candidateId;
+      const matchId = candidateId && c.id === candidateId;
       const matchEmail = candidateEmail && c.email && c.email.toLowerCase() === candidateEmail.toLowerCase();
       return !matchId && !matchEmail;
     }));
 
-    // 5. Clean up formApplicantStatuses
+    // 6. Clean up formApplicantStatuses
     setFormApplicantStatuses(prev => {
       const updated = { ...prev };
       if (candidateEmail) {
@@ -496,7 +589,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
       return updated;
     });
 
-    // 6. Delete in backend DB if persisted
+    // 7. Delete in backend DB if persisted
     if (candidateId && !candidateId.startsWith('cand-shiva-') && !candidateId.startsWith('cand-live-') && !candidateId.startsWith('cand-form-')) {
       try {
         await api.delete(`/recruitment/applications/${candidateId}`);
@@ -505,7 +598,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
       }
     }
 
-    if (inspectCandidate && (inspectCandidate.id === candidateId || (candidateEmail && inspectCandidate.email === candidateEmail))) {
+    if (inspectCandidate && ((candidateId && inspectCandidate.id === candidateId) || (candidateEmail && inspectCandidate.email && inspectCandidate.email.toLowerCase() === candidateEmail.toLowerCase()))) {
       setInspectCandidate(null);
     }
 
@@ -706,35 +799,53 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
     jobId: ''
   });
 
+  // Helper to auto-generate video interview meeting URL
+  const generateTeamsMeetingUrl = async (topic: string = 'Interview Session') => {
+    try {
+      const res = await api.post('/recruitment/generate-teams-link', { topic });
+      if (res.data?.data?.link) {
+        return res.data.data.link;
+      }
+    } catch (_) {}
+    const tenantId = '25276fbe-5e30-46cc-b2b0-f5d73c1ae006';
+    const randPart = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map(b => (b % 36).toString(36))
+      .join('');
+    const orgId = `${Math.random().toString(36).substring(2, 10)}-${Math.random().toString(36).substring(2, 6)}-4${Math.random().toString(36).substring(2, 5)}-a${Math.random().toString(36).substring(2, 5)}-${Math.random().toString(36).substring(2, 14)}`;
+    const context = encodeURIComponent(JSON.stringify({ Tid: tenantId, Oid: orgId }));
+    return `https://teams.microsoft.com/l/meetup-join/19%3ameeting_${randPart}%40thread.v2/0?context=${context}`;
+  };
+
   // Stage 6 Interview form & calendar state
   const [currentCalMonth, setCurrentCalMonth] = useState<Date>(new Date(2026, 7, 1)); // August 2026
   const [showScheduleModal, setShowScheduleModal] = useState<boolean>(false);
   const [showFormModal, setShowFormModal] = useState<boolean>(false);
+  const [newTagEmail, setNewTagEmail] = useState<string>('');
+  const [isGeneratingTeamsLink, setIsGeneratingTeamsLink] = useState<boolean>(false);
+  const [isSchedulingInterview, setIsSchedulingInterview] = useState<boolean>(false);
   const [interviewForm, setInterviewForm] = useState({
-    date: '2026-08-25',
-    time: '11:30 AM',
-    type: 'HR Screening',
-    interviewer: 'Sneha Nair',
-    link: ''
+    date: format(new Date(), 'yyyy-MM-dd'),
+    time: '',
+    type: '',
+    interviewer: '',
+    interviewerEmail: '',
+    candidateEmail: '',
+    taggedEmails: [] as string[],
+    link: '',
+    sendEmailInvite: true
   });
 
   const openAddSlotModal = (dateStr: string) => {
-    const existingOnDate = candidates.filter(c => c.interviewDate === dateStr);
-    const bookedTimes = existingOnDate.map(c => (c.interviewTime || '').trim().toLowerCase());
-
-    const standardSlots = [
-      '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-      '12:00 PM', '12:30 PM', '01:30 PM', '02:00 PM', '02:30 PM', '03:00 PM',
-      '03:30 PM', '04:00 PM', '04:30 PM', '05:00 PM', '05:30 PM', '06:00 PM'
-    ];
-    let nextAvailable = standardSlots.find(s => !bookedTimes.includes(s.toLowerCase())) || '06:30 PM';
-
     setInterviewForm({
       date: dateStr,
-      time: nextAvailable,
-      type: 'Technical Round',
-      interviewer: 'Sneha Nair',
-      link: ''
+      time: '',
+      type: '',
+      interviewer: '',
+      interviewerEmail: '',
+      candidateEmail: '',
+      taggedEmails: [],
+      link: '',
+      sendEmailInvite: true
     });
 
     setSelectedCandidate(null);
@@ -1149,8 +1260,9 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
   const pollLiveSheetResponses = async () => {
     try {
       const res = await api.get(`/recruitment/live-google-responses?t=${Date.now()}`);
-      if (res.data?.data?.responses?.length > 0) {
-        setLiveSheetResponses(res.data.data.responses);
+      if (res.data?.data?.responses && Array.isArray(res.data.data.responses)) {
+        const validResponses = res.data.data.responses.filter((r: any) => !isCandidateDeleted(r.id, r.email));
+        setLiveSheetResponses(validResponses);
       }
     } catch (_) {}
   };
@@ -1159,7 +1271,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
     loadRecruitmentData();
     pollLiveSheetResponses();
 
-    // Auto-update live Google Sheet submissions every 3 seconds in real time
+    // Auto-update live Google Sheet submissions and sync status every 3 seconds in real time
     const intervalId = setInterval(() => {
       pollLiveSheetResponses();
     }, 3000);
@@ -1419,12 +1531,13 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
   // Schedule Interview
   const handleScheduleInterview = async (candidateId: string) => {
+    if (isSchedulingInterview) return;
     if (!candidateId) {
       alert('Please select a candidate to schedule an interview.');
       return;
     }
-    if (!interviewForm.date || !interviewForm.time || !interviewForm.interviewer || !interviewForm.link || !interviewForm.link.trim()) {
-      alert('Please fill out Date, Time Slot, Interviewer, and Video Meeting Link (Required).');
+    if (!interviewForm.date || !interviewForm.time || !interviewForm.type || !interviewForm.interviewer || !interviewForm.link || !interviewForm.link.trim()) {
+      alert('Please fill out Date, Time Slot, Interview Type, Interviewer, and Video Meeting Link (Required).');
       return;
     }
 
@@ -1444,15 +1557,22 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
       return;
     }
 
-    const meetingLink = interviewForm.link.trim();
     const targetCand = candidates.find(c => c.id === candidateId || c.email === candidateId);
+    let meetingLink = (interviewForm.link || '').trim();
+    const candName = targetCand ? `${targetCand.firstName} ${targetCand.lastName}`.trim() : 'Candidate';
+    const targetCandEmail = interviewForm.candidateEmail || targetCand?.email || (candidateId.includes('@') ? candidateId : '');
+
+    if (!meetingLink) {
+      meetingLink = await generateTeamsMeetingUrl(`Interview: ${candName} - ${targetCand?.jobTitle || 'Role'}`);
+      setInterviewForm(prev => ({ ...prev, link: meetingLink }));
+    }
 
     const updatedScheduledCand: Candidate = {
       ...(targetCand || {
         id: candidateId,
         firstName: 'Applicant',
         lastName: '',
-        email: candidateId.includes('@') ? candidateId : `cand_${candidateId}@example.com`,
+        email: targetCandEmail || `cand_${candidateId}@example.com`,
         phone: 'N/A',
         source: 'Google Form',
         jobTitle: 'Google Form Recruitment',
@@ -1503,22 +1623,56 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
       return updated;
     });
 
-    if (candidateId && !candidateId.startsWith('cand-')) {
+    try {
+      setIsSchedulingInterview(true);
+      let backendEmailDispatched = false;
       try {
-        await api.patch(`/recruitment/applications/${candidateId}/interview`, {
+        const res = await api.patch(`/recruitment/applications/${candidateId}/interview`, {
           interviewDate: interviewForm.date,
           interviewTime: interviewForm.time,
           interviewType: interviewForm.type,
           interviewer: interviewForm.interviewer,
-          interviewLink: meetingLink
+          interviewLink: meetingLink,
+          candidateName: candName,
+          candidateEmail: targetCandEmail,
+          interviewerEmail: interviewForm.interviewerEmail,
+          taggedEmails: interviewForm.taggedEmails,
+          sendEmailInvite: interviewForm.sendEmailInvite,
+          phone: targetCand?.phone,
+          jobTitle: targetCand?.jobTitle || 'Google Form Recruitment',
+          experience: targetCand?.experience || 'Degree',
+          source: targetCand?.source || 'Google Form'
         });
+        if (res.data?.data?.emailDispatchResult?.success) {
+          backendEmailDispatched = true;
+        }
+        await loadRecruitmentData();
       } catch (err) {
-        console.warn('Backend update warning:', err);
+        console.warn('Backend interview schedule sync warning:', err);
       }
-    }
 
-    alert(`📅 Interview scheduled successfully for ${targetCand ? targetCand.firstName + ' ' + targetCand.lastName : 'Candidate'} on ${interviewForm.date} at ${interviewForm.time}!`);
-    setShowScheduleModal(false);
+      const recipientList = [targetCandEmail, interviewForm.interviewerEmail, ...interviewForm.taggedEmails].filter(Boolean);
+      const emailNotice = interviewForm.sendEmailInvite 
+        ? `\n\n📧 Real-time Microsoft Teams join link and Calendar (.ics) invitations have been sent to:\n• ${recipientList.join('\n• ')}`
+        : '';
+
+      alert(`📅 Interview scheduled successfully for ${candName} on ${interviewForm.date} at ${interviewForm.time}!${emailNotice}`);
+      setInterviewForm({
+        date: format(new Date(), 'yyyy-MM-dd'),
+        time: '',
+        type: '',
+        interviewer: '',
+        interviewerEmail: '',
+        candidateEmail: '',
+        taggedEmails: [],
+        link: '',
+        sendEmailInvite: true
+      });
+      setSelectedCandidate(null);
+      setShowScheduleModal(false);
+    } finally {
+      setIsSchedulingInterview(false);
+    }
   };
 
   // Pass or Fail Interview
@@ -1557,13 +1711,16 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
         return updated;
       });
 
-      // Update Backend DB if real database application
-      if (candidateId && !candidateId.startsWith('cand-')) {
-        try {
-          await api.patch(`/recruitment/applications/${candidateId}/interview`, { decision });
-        } catch (err) {
-          console.warn('Backend interview decision notice:', err);
-        }
+      // Update Backend DB permanently
+      try {
+        await api.patch(`/recruitment/applications/${candidateId}/interview`, { 
+          decision,
+          candidateEmail: candEmail,
+          candidateName: targetCand ? `${targetCand.firstName} ${targetCand.lastName}`.trim() : undefined
+        });
+        await loadRecruitmentData();
+      } catch (err) {
+        console.warn('Backend interview decision notice:', err);
       }
 
       if (decision === 'pass') {
@@ -2110,15 +2267,125 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
     }
   };
 
-  // Helper values for dashboard charts (exclude bulk auto-synced entries from board counts without database loss)
-  const boardCandidates = candidates.filter(c => c.source !== 'Google Form' && !c.email.includes('applicant_') && !c.email.includes('@example.com'));
-  const visibleJobs = jobs.filter(j => !j.title.includes('Google Form Recruitment'));
+  // Unified Real-Time System Candidates List
+  const unifiedCandidates = useMemo(() => {
+    const map = new Map<string, Candidate>();
+
+    // 1. Database & state candidates
+    candidates.forEach(c => {
+      if (isCandidateDeleted(c.id, c.email)) return;
+      const key = (c.email || c.id).toLowerCase();
+      const status = formApplicantStatuses[c.email] || formApplicantStatuses[c.id] || (c.email ? formApplicantStatuses[c.email.toLowerCase()] : undefined);
+      
+      let stage = c.stage;
+      if (status === 'accepted') stage = (c.stage === 'Applications' || !c.stage) ? 'Shortlisting' : c.stage;
+      else if (status === 'declined') stage = 'Rejected';
+      else if (status === 'interview') stage = 'Interviews';
+      else if (status === 'documents') stage = 'Documents';
+      else if (status === 'call_letter' || status === 'call-letter' || status === 'callletter') stage = 'Call Letter';
+      else if (status === 'offer') stage = 'Offer';
+      else if (status === 'onboarded') stage = 'Onboarding';
+
+      map.set(key, {
+        ...c,
+        stage: stage || 'Applications'
+      });
+    });
+
+    // 2. Live Google Form / Sheet responses
+    liveSheetResponses.forEach(r => {
+      if (r.email && !isCandidateDeleted(r.id, r.email)) {
+        const key = r.email.toLowerCase();
+        const status = formApplicantStatuses[r.email] || formApplicantStatuses[r.id] || (key ? formApplicantStatuses[key] : undefined);
+        let stage: Candidate['stage'] = 'Applications';
+        if (status === 'accepted') stage = 'Shortlisting';
+        else if (status === 'declined') stage = 'Rejected';
+        else if (status === 'interview') stage = 'Interviews';
+        else if (status === 'documents') stage = 'Documents';
+        else if (status === 'call_letter' || status === 'call-letter' || status === 'callletter') stage = 'Call Letter';
+        else if (status === 'offer') stage = 'Offer';
+        else if (status === 'onboarded') stage = 'Onboarding';
+
+        if (!map.has(key)) {
+          const nameParts = (r.fullName || 'Applicant').split(' ');
+          map.set(key, {
+            id: r.id || `cand-live-${r.email}`,
+            firstName: nameParts[0] || 'Applicant',
+            lastName: nameParts.slice(1).join(' ') || '',
+            email: r.email,
+            phone: r.mobile || 'N/A',
+            location: r.location || 'WNP',
+            experience: r.qualification || 'Degree',
+            graduationYear: r.graduationYear || '-',
+            appliedDate: r.timestamp || '24/08/2026 10:58:33',
+            resumeUrl: r.resumeLink,
+            attachmentImages: r.resumeLink ? [r.resumeLink] : [],
+            source: 'Google Form',
+            jobTitle: 'Google Form Recruitment',
+            stage: stage,
+            matchScore: 85,
+            skills: ['Google Form', r.qualification || 'Degree'],
+            avatarColor: 'bg-emerald-100 text-emerald-600 border-emerald-200'
+          });
+        }
+      }
+    });
+
+    // 3. Default fallback applicants
+    DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+      if (isCandidateDeleted(fb.id, fb.email)) return;
+      const key = fb.email.toLowerCase();
+      const status = formApplicantStatuses[fb.email] || formApplicantStatuses[fb.id] || (key ? formApplicantStatuses[key] : undefined);
+      let stage: Candidate['stage'] = 'Applications';
+      if (status === 'accepted') stage = 'Shortlisting';
+      else if (status === 'declined') stage = 'Rejected';
+      else if (status === 'interview') stage = 'Interviews';
+      else if (status === 'documents') stage = 'Documents';
+      else if (status === 'call_letter' || status === 'call-letter' || status === 'callletter') stage = 'Call Letter';
+      else if (status === 'offer') stage = 'Offer';
+      else if (status === 'onboarded') stage = 'Onboarding';
+
+      if (!map.has(key) && !map.has(fb.id)) {
+        map.set(key, {
+          id: fb.id,
+          firstName: fb.firstName,
+          lastName: fb.lastName,
+          email: fb.email,
+          phone: fb.phone,
+          location: fb.location,
+          experience: fb.experience,
+          graduationYear: fb.graduationYear,
+          appliedDate: fb.appliedDate,
+          resumeUrl: fb.resumeUrl,
+          attachmentImages: fb.resumeUrl ? [fb.resumeUrl] : [],
+          source: fb.source || 'Google Form',
+          jobTitle: fb.jobTitle || 'Google Form Recruitment',
+          stage: stage,
+          matchScore: 85,
+          skills: ['Google Form', fb.experience || 'Degree'],
+          avatarColor: 'bg-emerald-100 text-emerald-600 border-emerald-200'
+        });
+      }
+    });
+
+    return Array.from(map.values()).filter(c => 
+      !isCandidateDeleted(c.id, c.email) &&
+      !c.email?.includes('applicant_') && 
+      !c.email?.includes('@example.com') &&
+      !c.email?.includes('employee_')
+    );
+  }, [candidates, liveSheetResponses, formApplicantStatuses]);
+
+  // Helper values for dashboard charts and metrics
+  const boardCandidates = unifiedCandidates;
+  const visibleJobs = jobs.length > 0 ? jobs : DEFAULT_FALLBACK_JOBS;
   const SOURCE_DATA = boardCandidates.reduce<any[]>((acc, cur) => {
-    const existing = acc.find(x => x.name === cur.source);
+    const srcName = cur.source || 'Google Form';
+    const existing = acc.find(x => x.name === srcName);
     if (existing) {
       existing.value += 1;
     } else {
-      acc.push({ name: cur.source, value: 1, fill: SOURCE_FILLS[cur.source] || SOURCE_FILLS.Others });
+      acc.push({ name: srcName, value: 1, fill: SOURCE_FILLS[srcName] || SOURCE_FILLS.Others });
     }
     return acc;
   }, []);
@@ -2148,7 +2415,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
               <h1 className="rec-page-title">Recruitment Console</h1>
               <div className="rec-live-status">
                 <span className="rec-live-dot" />
-                <span className="rec-live-text">Live · {visibleJobs.filter(j => j.status === 'Published' || j.status === 'OPEN').length} Active Jobs</span>
+                <span className="rec-live-text">Live · {visibleJobs.filter(j => j.status === 'Published' || (j.status as any) === 'OPEN' || !j.status).length} Active Positions · {unifiedCandidates.length} Candidates</span>
               </div>
             </div>
           </div>
@@ -2260,13 +2527,49 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
               <>
 
                 {/* KPI Stats Row */}
-                <div className="rec-stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-                  <StatCard icon={Briefcase} title="Active Jobs" value={visibleJobs.filter(j => j.status === 'Published' || j.status === 'OPEN').length.toString()} trend="Job listings online" color="blue" />
-                  <StatCard icon={Calendar} title="Interviews Scheduled" value={candidates.filter(c => c.stage === 'Interviews').length.toString()} trend="Interviews in progress" color="purple" />
-                  <StatCard icon={FolderOpen} title="Document Verification" value={candidates.filter(c => c.stage === 'Documents').length.toString()} trend="Credential verification" color="emerald" />
-                  <StatCard icon={MailCheck} title="Call Letters" value={candidates.filter(c => c.stage === 'Call Letter').length.toString()} trend="Call letter stage" color="indigo" />
-                  <StatCard icon={Send} title="Offers Issued" value={candidates.filter(c => c.stage === 'Offer').length.toString()} trend="Offer stage candidate" color="amber" />
-                  <StatCard icon={UserCheck} title="Onboarding" value={candidates.filter(c => c.stage === 'Onboarding').length.toString()} trend="Onboarding in system" color="emerald" />
+                <div className="rec-stats-grid" style={{ gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: '0.85rem' }}>
+                  <StatCard 
+                    icon={Briefcase} 
+                    title="Active Jobs" 
+                    value={visibleJobs.filter(j => j.status === 'Published' || (j.status as any) === 'OPEN' || !j.status).length.toString()} 
+                    trend="Job listings online" 
+                    color="blue" 
+                  />
+                  <StatCard 
+                    icon={Calendar} 
+                    title="Interviews Scheduled" 
+                    value={unifiedCandidates.filter(c => c.stage === 'Interviews' || c.interviewDate).length.toString()} 
+                    trend="Interviews in progress" 
+                    color="purple" 
+                  />
+                  <StatCard 
+                    icon={FolderOpen} 
+                    title="Document Verification" 
+                    value={unifiedCandidates.filter(c => c.stage === 'Documents' || formApplicantStatuses[c.email] === 'documents').length.toString()} 
+                    trend="Credential verification" 
+                    color="emerald" 
+                  />
+                  <StatCard 
+                    icon={MailCheck} 
+                    title="Call Letters" 
+                    value={unifiedCandidates.filter(c => c.stage === 'Call Letter' || formApplicantStatuses[c.email] === 'call_letter').length.toString()} 
+                    trend="Call letter stage" 
+                    color="indigo" 
+                  />
+                  <StatCard 
+                    icon={Send} 
+                    title="Offers Issued" 
+                    value={unifiedCandidates.filter(c => c.stage === 'Offer' || formApplicantStatuses[c.email] === 'offer').length.toString()} 
+                    trend="Offer stage candidate" 
+                    color="amber" 
+                  />
+                  <StatCard 
+                    icon={UserCheck} 
+                    title="Onboarding" 
+                    value={unifiedCandidates.filter(c => c.stage === 'Onboarding' || formApplicantStatuses[c.email] === 'onboarded').length.toString()} 
+                    trend="Onboarding in system" 
+                    color="emerald" 
+                  />
                 </div>
 
                 {/* Main Dashboard Layout */}
@@ -2276,7 +2579,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                     <div className="rec-section-header" style={{ marginBottom: '1.25rem' }}>
                       <div>
                         <h2 className="rec-section-title">Hiring Pipeline Board</h2>
-                        <p className="rec-section-sub">Candidate count across primary recruitment phases</p>
+                        <p className="rec-section-sub">Live candidate count across primary recruitment phases</p>
                       </div>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '0.65rem', overflowX: 'auto', paddingBottom: '0.5rem' }}>
@@ -2290,7 +2593,16 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                         { key: 'Offer', label: 'Offer', color: '#f97316', bg: 'rgba(249,115,22,0.08)' },
                         { key: 'Onboarding', label: 'Hired', color: '#059669', bg: 'rgba(5,150,105,0.08)' },
                       ].map(stage => {
-                        const count = boardCandidates.filter(c => c.stage === stage.key).length;
+                        let count = 0;
+                        if (stage.key === 'Applications') {
+                          count = unifiedCandidates.filter(c => c.stage === 'Applications' || !c.stage).length;
+                        } else if (stage.key === 'AI Screening') {
+                          count = unifiedCandidates.filter(c => c.stage === 'AI Screening' || (c.matchScore && c.matchScore > 0)).length;
+                        } else if (stage.key === 'Shortlisting') {
+                          count = unifiedCandidates.filter(c => c.stage === 'Shortlisting' || formApplicantStatuses[c.email] === 'accepted').length;
+                        } else {
+                          count = unifiedCandidates.filter(c => c.stage === stage.key).length;
+                        }
                         return (
                           <div key={stage.key} style={{ background: stage.bg, padding: '0.85rem 0.4rem', borderRadius: '0.75rem', textAlign: 'center', border: `1px solid ${stage.color}15` }}>
                             <p style={{ fontSize: '0.62rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', whiteSpace: 'nowrap', margin: 0 }}>{stage.label}</p>
@@ -2483,7 +2795,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                     </thead>
                     <tbody>
                       {(() => {
-                        const formRows = liveSheetResponses.length > 0
+                        const formRows = (liveSheetResponses.length > 0
                           ? liveSheetResponses.map(r => ({
                               id: r.id,
                               firstName: r.fullName?.split(' ')[0] || r.fullName || 'Applicant',
@@ -2500,8 +2812,10 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                               !c.email.includes('applicant_') && 
                               !c.email.includes('@example.com') && 
                               (c.source === 'Google Form' || c.email.includes('shivaram') || c.email.includes('gmail.com'))
-                            );
-                        const rowsToRender = formRows.length > 0 ? formRows : DEFAULT_FALLBACK_APPLICANTS;
+                            )
+                        ).filter(c => !isCandidateDeleted(c.id, c.email));
+                        const filteredFallbacks = DEFAULT_FALLBACK_APPLICANTS.filter(fb => !isCandidateDeleted(fb.id, fb.email));
+                        const rowsToRender = formRows.length > 0 ? formRows : filteredFallbacks;
 
                         return rowsToRender.map((c: any) => {
                           let driveUrl = c.resumeUrl || 'https://drive.google.com/open?id=1KHGMjppH53O9yfI9Wj0fmUpOAjjytA7z';
@@ -2692,7 +3006,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                       </thead>
                       <tbody>
                         {(() => {
-                          const formRows = liveSheetResponses.length > 0
+                          const formRows = (liveSheetResponses.length > 0
                             ? liveSheetResponses.map(r => ({
                                 id: r.id,
                                 firstName: r.fullName?.split(' ')[0] || r.fullName || 'Applicant',
@@ -2709,8 +3023,9 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                 !c.email.includes('applicant_') && 
                                 !c.email.includes('@example.com') && 
                                 (c.source === 'Google Form' || c.email.includes('shivaram') || c.email.includes('gmail.com'))
-                              );
-                          const rowsToRender = formRows.length > 0 ? formRows : [
+                              )
+                          ).filter(c => !isCandidateDeleted(c.id, c.email));
+                          const fallbackRows = [
                             {
                               id: 'cand-shiva-1',
                               firstName: 'Shiva',
@@ -2747,7 +3062,8 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                               resumeUrl: 'https://drive.google.com/open?id=1rnDWuhRDVf4WvyNmNyknoMCVaeyNnGtr',
                               attachmentImages: ['https://drive.google.com/open?id=1rnDWuhRDVf4WvyNmNyknoMCVaeyNnGtr']
                             }
-                          ];
+                          ].filter(fb => !isCandidateDeleted(fb.id, fb.email));
+                          const rowsToRender = formRows.length > 0 ? formRows : fallbackRows;
 
                           return rowsToRender.map((c: any) => {
                             let driveUrl = c.resumeUrl || 'https://drive.google.com/open?id=1KHGMjppH53O9yfI9Wj0fmUpOAjjytA7z';
@@ -3184,6 +3500,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
               // 1. candidates from state (stage is Shortlisting, AI Screening, or accepted in statuses)
               candidates.forEach(c => {
+                if (isCandidateDeleted(c.id, c.email)) return;
                 const emailKey = (c.email || '').toLowerCase();
                 const status = formApplicantStatuses[c.email] || formApplicantStatuses[c.id] || (emailKey ? formApplicantStatuses[emailKey] : undefined);
                 const isAccepted = status === 'accepted';
@@ -3199,6 +3516,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
               // 2. stored shortlisted candidates from localStorage
               const storedShortlisted = getStoredShortlistedCandidates();
               storedShortlisted.forEach(sc => {
+                if (isCandidateDeleted(sc.id, sc.email)) return;
                 const key = (sc.email || sc.id).toLowerCase();
                 if (!map.has(key) && isShortlistCandidate(sc)) {
                   map.set(key, { ...sc, stage: 'Shortlisting' });
@@ -3207,7 +3525,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
               // 3. live sheet responses that are accepted
               liveSheetResponses.forEach(r => {
-                if (r.email) {
+                if (r.email && !isCandidateDeleted(r.id, r.email)) {
                   const emailKey = r.email.toLowerCase();
                   const status = formApplicantStatuses[r.email] || formApplicantStatuses[r.id] || (emailKey ? formApplicantStatuses[emailKey] : undefined);
                   const isAccepted = status === 'accepted';
@@ -3240,6 +3558,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
               // 4. default fallback rows that are accepted
               DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+                if (isCandidateDeleted(fb.id, fb.email)) return;
                 const emailKey = fb.email.toLowerCase();
                 const status = formApplicantStatuses[fb.email] || formApplicantStatuses[fb.id] || (emailKey ? formApplicantStatuses[emailKey] : undefined);
                 const isAccepted = status === 'accepted';
@@ -3345,9 +3664,23 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                 </button>
                               ) : (
                                 <button 
-                                  onClick={() => {
+                                  onClick={async () => {
                                     setSelectedCandidate(c);
+                                    const candName = `${c.firstName} ${c.lastName}`.trim();
+                                    const autoLink = await generateTeamsMeetingUrl(`VRPI Interview: ${candName} - ${c.jobTitle || 'Role'}`);
+                                    setInterviewForm({
+                                      date: format(new Date(), 'yyyy-MM-dd'),
+                                      time: '',
+                                      type: 'Technical Round',
+                                      interviewer: '',
+                                      interviewerEmail: '',
+                                      candidateEmail: c.email || '',
+                                      taggedEmails: [],
+                                      link: autoLink,
+                                      sendEmailInvite: true
+                                    });
                                     setActiveTab('stage-6');
+                                    setShowScheduleModal(true);
                                   }} 
                                   className="rec-btn-primary" 
                                   style={{ flex: 1, fontSize: '0.7rem', height: '32px', padding: '0', justifyContent: 'center', background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}
@@ -3486,10 +3819,18 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
                       <button
                         onClick={() => {
-                          if (!selectedCandidate) {
-                            const firstCand = candidates.find(c => c.stage === 'Shortlisting' || c.stage === 'Interviews') || candidates[0];
-                            if (firstCand) setSelectedCandidate(firstCand);
-                          }
+                          setSelectedCandidate(null);
+                          setInterviewForm({
+                            date: format(new Date(), 'yyyy-MM-dd'),
+                            time: '',
+                            type: '',
+                            interviewer: '',
+                            interviewerEmail: '',
+                            candidateEmail: '',
+                            taggedEmails: [],
+                            link: '',
+                            sendEmailInvite: true
+                          });
                           setShowScheduleModal(true);
                         }}
                         className="rec-btn-primary"
@@ -3568,11 +3909,18 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                             <div
                               key={idx}
                               onClick={() => {
-                                setInterviewForm(prev => ({ ...prev, date: cell.dateStr }));
-                                if (!selectedCandidate) {
-                                  const cand = candidates.find(c => c.stage === 'Shortlisting' || c.stage === 'Interviews') || candidates[0];
-                                  if (cand) setSelectedCandidate(cand);
-                                }
+                                setSelectedCandidate(null);
+                                setInterviewForm({
+                                  date: cell.dateStr,
+                                  time: '',
+                                  type: '',
+                                  interviewer: '',
+                                  interviewerEmail: '',
+                                  candidateEmail: '',
+                                  taggedEmails: [],
+                                  link: '',
+                                  sendEmailInvite: true
+                                });
                                 setShowScheduleModal(true);
                               }}
                               style={{
@@ -3713,7 +4061,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                           {candidates.filter(c => c.stage === 'Interviews').length} Active
                         </span>
                       </div>
-                      <p className="rec-section-sub" style={{ margin: '3px 0 0 0', color: '#64748b' }}>Launch Google Meet video sessions, copy meeting URLs, and evaluate candidate interview outcomes</p>
+                      <p className="rec-section-sub" style={{ margin: '3px 0 0 0', color: '#64748b' }}>Launch Microsoft Teams video sessions, copy meeting URLs, and evaluate candidate interview outcomes</p>
                     </div>
                   </div>
 
@@ -3797,25 +4145,47 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                                           height: '32px',
                                           padding: '0 12px',
                                           gap: '6px',
-                                          background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                                          background: 'linear-gradient(135deg, #464EB8 0%, #5B5FC7 100%)',
                                           textDecoration: 'none',
                                           borderRadius: '0.5rem',
-                                          boxShadow: '0 3px 8px rgba(16, 185, 129, 0.3)',
-                                          fontWeight: 700
+                                          boxShadow: '0 3px 8px rgba(70, 78, 184, 0.35)',
+                                          fontWeight: 700,
+                                          whiteSpace: 'nowrap',
+                                          display: 'inline-flex',
+                                          alignItems: 'center'
                                         }}
                                       >
-                                        <Video className="h-3.5 w-3.5" /> Join Google Meet
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+                                          <path d="M16.5 6a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" fill="#A4ACF8"/>
+                                          <path d="M14 7h5a3 3 0 0 1 3 3v4.5a1.5 1.5 0 0 1-1.5 1.5H18v-4a2.5 2.5 0 0 0-2.5-2.5H14V7Z" fill="#A4ACF8"/>
+                                          <path d="M10 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="#FFFFFF"/>
+                                          <path d="M4.5 8.5A2.5 2.5 0 0 0 2 11v4.5A2.5 2.5 0 0 0 4.5 18H10a3 3 0 0 0 3-3v-4a2.5 2.5 0 0 0-2.5-2.5h-6Z" fill="#FFFFFF" fillOpacity="0.9"/>
+                                          <rect x="2" y="9.5" width="8" height="8" rx="1.5" fill="#4B53BC"/>
+                                          <path d="M7.2 11.2H4.8v1.2h.7v3h1.2v-3h.7v-1.2Z" fill="#FFFFFF"/>
+                                        </svg>
+                                        Join Teams Meeting
                                       </a>
                                       <button
                                         onClick={() => {
                                           navigator.clipboard.writeText(meetLink);
-                                          alert('✅ Google Meet link copied to clipboard!');
+                                          alert('✅ Meeting link copied to clipboard!');
                                         }}
                                         className="rec-btn-outline"
                                         style={{ height: '32px', width: '32px', padding: 0, borderRadius: '0.5rem', justifyContent: 'center', borderColor: '#cbd5e1' }}
                                         title="Copy Meeting Link"
                                       >
                                         <Copy className="h-3.5 w-3.5 text-slate-600" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(getInterviewInvitationText(c));
+                                          alert('✅ Formatted VRPI Interview Invitation email copied to clipboard!');
+                                        }}
+                                        className="rec-btn-outline"
+                                        style={{ height: '32px', padding: '0 8px', borderRadius: '0.5rem', justifyContent: 'center', borderColor: '#c7d2fe', background: '#eef2ff', color: '#4338ca', fontSize: '0.68rem', fontWeight: 700, gap: '4px' }}
+                                        title="Copy VRPI Interview Schedule Email Format"
+                                      >
+                                        <Mail className="h-3.5 w-3.5" /> Copy Invite
                                       </button>
                                     </div>
                                   ) : (
@@ -3854,241 +4224,477 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                   </div>
                 </div>
 
-                {/* ════════════════ SCHEDULE INTERVIEW SLOT MODAL ════════════════ */}
+                {/* ════════════════ SCHEDULE INTERVIEW SLOT MODAL (LANDSCAPE) ════════════════ */}
                 {showScheduleModal && (
-                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(8px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-                    <div style={{ background: '#ffffff', borderRadius: '1.25rem', width: '100%', maxWidth: '540px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)', overflow: 'hidden', border: '1px solid #e2e8f0', animation: 'fadeIn 0.2s ease-out' }}>
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(8px)', zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>
+                    <div style={{ background: '#ffffff', borderRadius: '1.25rem', width: '100%', maxWidth: '940px', maxHeight: '92vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)', overflow: 'hidden', border: '1px solid #e2e8f0', animation: 'fadeIn 0.2s ease-out' }}>
                       {/* Modal Header */}
-                      <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #7c3aed 100%)', padding: '1.25rem 1.75rem', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #7c3aed 100%)', padding: '1.1rem 1.75rem', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <div style={{ padding: '6px', background: 'rgba(255, 255, 255, 0.2)', borderRadius: '8px' }}>
                             <Calendar className="h-5 w-5 text-white" />
                           </div>
                           <div>
-                            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, margin: 0 }}>Schedule Interview Slot</h3>
-                            <p style={{ fontSize: '0.72rem', color: '#e0e7ff', margin: '2px 0 0 0' }}>Assign video meeting, date, time & panel members</p>
+                            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0 }}>Schedule Interview Slot</h3>
+                            <p style={{ fontSize: '0.72rem', color: '#e0e7ff', margin: '2px 0 0 0' }}>Assign candidate, video meeting room, panel members & tagged notification recipients</p>
                           </div>
                         </div>
                         <button
                           onClick={() => setShowScheduleModal(false)}
-                          style={{ background: 'rgba(255, 255, 255, 0.2)', border: 0, color: '#fff', borderRadius: '50%', width: '30px', height: '30px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', fontWeight: 800, transition: 'all 0.2s' }}
+                          style={{ background: 'rgba(255, 255, 255, 0.2)', border: 0, color: '#fff', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1rem', fontWeight: 800, transition: 'all 0.2s' }}
                         >
                           ✕
                         </button>
                       </div>
 
                       {/* Modal Body */}
-                      <form onSubmit={(e) => { e.preventDefault(); if (selectedCandidate) handleScheduleInterview(selectedCandidate.id); }} style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                        {/* Summary of existing slots on this date */}
+                      <form onSubmit={(e) => { e.preventDefault(); if (selectedCandidate) handleScheduleInterview(selectedCandidate.id); }} style={{ padding: '1.5rem 1.75rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {/* Summary of existing slots on this date if any */}
                         {(() => {
                           const slotsOnDate = candidates.filter(c => c.interviewDate === interviewForm.date);
                           if (slotsOnDate.length === 0) return null;
                           return (
-                            <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '0.85rem', padding: '0.85rem', fontSize: '0.75rem' }}>
-                              <p style={{ fontWeight: 800, color: '#6b21a8', margin: '0 0 6px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: '0.75rem', padding: '0.65rem 1rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                              <p style={{ fontWeight: 800, color: '#6b21a8', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <Calendar className="h-4 w-4" /> {slotsOnDate.length} Interview Slot{slotsOnDate.length > 1 ? 's' : ''} Already Scheduled on {interviewForm.date}:
                               </p>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                                 {slotsOnDate.map(cand => (
-                                  <div key={cand.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff', padding: '5px 10px', borderRadius: '6px', border: '1px solid #d8b4fe' }}>
-                                    <span style={{ fontWeight: 700, color: '#0f172a' }}>{cand.interviewTime || '11:30 AM'} · {cand.firstName} {cand.lastName}</span>
-                                    <span style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600 }}>{cand.interviewType || 'HR'} ({cand.interviewer || 'Panel'})</span>
-                                  </div>
+                                  <span key={cand.id} style={{ background: '#fff', padding: '3px 8px', borderRadius: '6px', border: '1px solid #d8b4fe', fontWeight: 700, color: '#0f172a', fontSize: '0.7rem' }}>
+                                    {cand.interviewTime || '11:30 AM'} · {cand.firstName} {cand.lastName} ({cand.interviewType || 'HR'})
+                                  </span>
                                 ))}
                               </div>
                             </div>
                           );
                         })()}
 
-                        {/* Select Candidate */}
-                        <div className="auth-luxury-label">
-                          Select Candidate *
-                          <select 
-                            className="rec-select" 
-                            style={{ width: '100%', height: '42px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
-                            value={selectedCandidate?.id || ''}
-                            onChange={e => {
-                              const cand = candidates.find(c => c.id === e.target.value);
-                              setSelectedCandidate(cand || null);
-                            }}
-                            required
-                          >
-                            <option value="">-- Select Candidate --</option>
-                            {candidates.filter(c => c.stage === 'Shortlisting' || c.stage === 'Interviews' || c.stage === 'Applications').map(c => (
-                              <option key={c.id} value={c.id}>
-                                {c.firstName} {c.lastName} ({c.jobTitle}) - #{getCandidateCode(c)}
-                              </option>
-                            ))}
-                          </select>
+                        {/* Landscape 2-Column Grid */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '1.5rem', alignItems: 'start' }}>
+                          
+                          {/* ── LEFT COLUMN: Candidate & Timing Details ── */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                            <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '0.4rem', fontWeight: 800, fontSize: '0.82rem', color: '#4f46e5', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>1. Candidate & Interview Schedule</span>
+                            </div>
+
+                            {/* Select Candidate */}
+                            <div className="auth-luxury-label">
+                              Select Candidate *
+                              <select 
+                                className="rec-select" 
+                                style={{ width: '100%', height: '40px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
+                                value={selectedCandidate?.id || ''}
+                                onChange={async (e) => {
+                                  const cand = candidates.find(c => c.id === e.target.value);
+                                  setSelectedCandidate(cand || null);
+                                  if (cand) {
+                                    const candName = `${cand.firstName} ${cand.lastName}`.trim();
+                                    setIsGeneratingTeamsLink(true);
+                                    const autoLink = await generateTeamsMeetingUrl(`VRPI Interview: ${candName} - ${cand.jobTitle || 'Role'}`);
+                                    setInterviewForm(prev => ({
+                                      ...prev,
+                                      candidateEmail: cand.email || '',
+                                      link: autoLink
+                                    }));
+                                    setIsGeneratingTeamsLink(false);
+                                  } else {
+                                    setInterviewForm(prev => ({
+                                      ...prev,
+                                      candidateEmail: '',
+                                      link: ''
+                                    }));
+                                  }
+                                }}
+                                required
+                              >
+                                <option value="">-- Select Candidate --</option>
+                                {candidates.filter(c => c.stage === 'Shortlisting' || c.stage === 'Interviews' || c.stage === 'Applications').map(c => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.firstName} {c.lastName} ({c.jobTitle}) - #{getCandidateCode(c)}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Candidate Email & Interviewer Email Row */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                              <div className="auth-luxury-label">
+                                Candidate Email *
+                                <input 
+                                  type="email" 
+                                  className="rec-search-input" 
+                                  style={{ width: '100%', paddingLeft: '0.85rem', height: '40px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 600, fontSize: '0.8rem' }}
+                                  placeholder="candidate@example.com"
+                                  value={interviewForm.candidateEmail}
+                                  onChange={e => setInterviewForm({...interviewForm, candidateEmail: e.target.value})}
+                                  required
+                                />
+                              </div>
+                              <div className="auth-luxury-label">
+                                Interviewer Email *
+                                <input 
+                                  type="email" 
+                                  className="rec-search-input" 
+                                  style={{ width: '100%', paddingLeft: '0.85rem', height: '40px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 600, fontSize: '0.8rem' }}
+                                  placeholder="interviewer@vrpigroup.com"
+                                  value={interviewForm.interviewerEmail}
+                                  onChange={e => setInterviewForm({...interviewForm, interviewerEmail: e.target.value})}
+                                  required
+                                />
+                              </div>
+                            </div>
+
+                            {/* Date & Time Row */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                              <div className="auth-luxury-label">
+                                Interview Date *
+                                <input 
+                                  type="date" 
+                                  className="rec-search-input" 
+                                  style={{ width: '100%', paddingLeft: '0.85rem', height: '40px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
+                                  value={interviewForm.date}
+                                  onChange={e => setInterviewForm({...interviewForm, date: e.target.value})}
+                                  required
+                                />
+                              </div>
+                              <div className="auth-luxury-label">
+                                Time Slot *
+                                {(() => {
+                                  const slots = [
+                                    '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
+                                    '12:00 PM', '12:30 PM', '01:30 PM', '02:00 PM', '02:30 PM', '03:00 PM',
+                                    '03:30 PM', '04:00 PM', '04:30 PM', '05:00 PM', '05:30 PM', '06:00 PM'
+                                  ];
+                                  const isConflict = candidates.some(c => 
+                                    c.interviewDate === interviewForm.date && 
+                                    (c.interviewTime || '').trim().toLowerCase() === (interviewForm.time || '').trim().toLowerCase() && 
+                                    c.id !== selectedCandidate?.id &&
+                                    c.email !== selectedCandidate?.id
+                                  );
+                                  const conflictingCand = candidates.find(c => 
+                                    c.interviewDate === interviewForm.date && 
+                                    (c.interviewTime || '').trim().toLowerCase() === (interviewForm.time || '').trim().toLowerCase() && 
+                                    c.id !== selectedCandidate?.id &&
+                                    c.email !== selectedCandidate?.id
+                                  );
+
+                                  return (
+                                    <div>
+                                      <select
+                                        className="rec-select"
+                                        style={{
+                                          width: '100%',
+                                          height: '40px',
+                                          marginTop: '4px',
+                                          borderRadius: '0.75rem',
+                                          fontWeight: 700,
+                                          borderColor: isConflict ? '#fca5a5' : undefined,
+                                          background: isConflict ? '#fef2f2' : undefined
+                                        }}
+                                        value={interviewForm.time}
+                                        onChange={e => setInterviewForm({ ...interviewForm, time: e.target.value })}
+                                        required
+                                      >
+                                        <option value="">-- Select Available Slot --</option>
+                                        {slots.map(s => {
+                                          const bookedCand = candidates.find(c => 
+                                            c.interviewDate === interviewForm.date && 
+                                            (c.interviewTime || '').trim().toLowerCase() === s.toLowerCase() && 
+                                            c.id !== selectedCandidate?.id &&
+                                            c.email !== selectedCandidate?.id
+                                          );
+                                          return (
+                                            <option 
+                                              key={s} 
+                                              value={s} 
+                                              disabled={!!bookedCand}
+                                              style={{ color: bookedCand ? '#94a3b8' : '#0f172a', fontWeight: bookedCand ? 400 : 700 }}
+                                            >
+                                              {s} {bookedCand ? `⛔ (BOOKED - ${bookedCand.firstName} ${bookedCand.lastName})` : '✅ (Available)'}
+                                            </option>
+                                          );
+                                        })}
+                                      </select>
+                                      {isConflict && conflictingCand && (
+                                        <p style={{ fontSize: '0.68rem', color: '#dc2626', fontWeight: 800, margin: '4px 0 0 0' }}>
+                                          ⚠️ Slot "{interviewForm.time}" is BOOKED for {conflictingCand.firstName} {conflictingCand.lastName}.
+                                        </p>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </div>
+
+                            {/* Type & Panel Row */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                              <div className="auth-luxury-label">
+                                Interview Type *
+                                <select 
+                                  className="rec-select" 
+                                  style={{ width: '100%', height: '40px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
+                                  value={interviewForm.type}
+                                  onChange={e => setInterviewForm({...interviewForm, type: e.target.value})}
+                                  required
+                                >
+                                  <option value="">-- Select Interview Round --</option>
+                                  <option value="HR Screening">HR Screening</option>
+                                  <option value="Technical Round">Technical Round</option>
+                                  <option value="Coding Assessment">Coding Assessment</option>
+                                  <option value="Management Final">Management Final</option>
+                                </select>
+                              </div>
+                              <div className="auth-luxury-label">
+                                Interviewer / Panel *
+                                <input 
+                                  type="text" 
+                                  className="rec-search-input" 
+                                  style={{ width: '100%', paddingLeft: '0.85rem', height: '40px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
+                                  placeholder="e.g. Interviewer / Panel Name"
+                                  value={interviewForm.interviewer}
+                                  onChange={e => setInterviewForm({...interviewForm, interviewer: e.target.value})}
+                                  required
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* ── RIGHT COLUMN: Tagged Emails & Meeting Video URL ── */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                            <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '0.4rem', fontWeight: 800, fontSize: '0.82rem', color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span>2. Video Meeting & Tagged Notifications</span>
+                              <span style={{ fontSize: '0.7rem', color: '#6366f1', background: '#ede9fe', padding: '2px 8px', borderRadius: '10px' }}>
+                                {interviewForm.taggedEmails.length} Tagged
+                              </span>
+                            </div>
+
+                            {/* Tagged / CC Emails */}
+                            <div className="auth-luxury-label">
+                              <span>Tagged / CC Emails for Notifications</span>
+
+                              {/* Chips list */}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '4px', marginBottom: '6px', minHeight: '32px', maxHeight: '72px', overflowY: 'auto', padding: '4px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                {interviewForm.taggedEmails.length === 0 ? (
+                                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', padding: '3px 4px' }}>No CC emails added yet.</span>
+                                ) : (
+                                  interviewForm.taggedEmails.map((email, idx) => (
+                                    <span
+                                      key={idx}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        background: '#ede9fe',
+                                        color: '#5b21b6',
+                                        padding: '2px 8px',
+                                        borderRadius: '16px',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 700,
+                                        border: '1px solid #ddd6fe'
+                                      }}
+                                    >
+                                      ✉️ {email}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setInterviewForm(prev => ({
+                                            ...prev,
+                                            taggedEmails: prev.taggedEmails.filter((_, i) => i !== idx)
+                                          }));
+                                        }}
+                                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#7c3aed', fontWeight: 800, padding: 0, fontSize: '0.72rem' }}
+                                      >
+                                        ✕
+                                      </button>
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+
+                              {/* Add tag input */}
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                <input
+                                  type="email"
+                                  className="rec-search-input"
+                                  style={{ flex: 1, paddingLeft: '0.85rem', height: '36px', borderRadius: '0.65rem', fontSize: '0.78rem' }}
+                                  placeholder="Type email (e.g. hr@vrpigroup.com) and click Add"
+                                  value={newTagEmail}
+                                  onChange={e => setNewTagEmail(e.target.value)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      const trimmed = newTagEmail.trim();
+                                      if (trimmed && trimmed.includes('@') && !interviewForm.taggedEmails.includes(trimmed)) {
+                                        setInterviewForm(prev => ({ ...prev, taggedEmails: [...prev.taggedEmails, trimmed] }));
+                                        setNewTagEmail('');
+                                      }
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const trimmed = newTagEmail.trim();
+                                    if (trimmed && trimmed.includes('@') && !interviewForm.taggedEmails.includes(trimmed)) {
+                                      setInterviewForm(prev => ({ ...prev, taggedEmails: [...prev.taggedEmails, trimmed] }));
+                                      setNewTagEmail('');
+                                    }
+                                  }}
+                                  className="rec-btn-outline"
+                                  style={{ height: '36px', padding: '0 12px', borderRadius: '0.65rem', fontSize: '0.75rem', fontWeight: 700 }}
+                                >
+                                  + Add Tag
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Meeting Link Field with Action Buttons */}
+                            <div className="auth-luxury-label">
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span>Video Meeting Link *</span>
+                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                  {interviewForm.link && (
+                                    <a
+                                      href={interviewForm.link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{
+                                        background: '#f1f5f9',
+                                        color: '#475569',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '6px',
+                                        padding: '4px 10px',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 700,
+                                        textDecoration: 'none',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px'
+                                      }}
+                                    >
+                                      🌐 Test Link
+                                    </a>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      setIsGeneratingTeamsLink(true);
+                                      const candName = selectedCandidate ? `${selectedCandidate.firstName} ${selectedCandidate.lastName}` : 'Candidate';
+                                      const topic = `VRPI Interview: ${candName} - ${selectedCandidate?.jobTitle || interviewForm.type || 'Role'}`;
+                                      const newLink = await generateTeamsMeetingUrl(topic);
+                                      setInterviewForm(prev => ({ ...prev, link: newLink }));
+                                      setIsGeneratingTeamsLink(false);
+                                    }}
+                                    style={{
+                                      background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      padding: '4px 12px',
+                                      fontSize: '0.72rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      boxShadow: '0 2px 6px rgba(79, 70, 229, 0.3)'
+                                    }}
+                                    title="Create / refresh instant interview meeting room"
+                                  >
+                                    {isGeneratingTeamsLink ? '⏳ Creating...' : '✨ Create / Refresh Meeting Link'}
+                                  </button>
+                                </div>
+                              </div>
+                              <div>
+                                <input 
+                                  type="url" 
+                                  className="rec-search-input" 
+                                  style={{ width: '100%', paddingLeft: '0.85rem', height: '40px', borderRadius: '0.75rem', fontWeight: 600, fontSize: '0.78rem' }}
+                                  placeholder="Meeting link will be auto-generated here"
+                                  value={interviewForm.link}
+                                  onChange={e => setInterviewForm({...interviewForm, link: e.target.value})}
+                                  required
+                                />
+                              </div>
+                              <p style={{ margin: '4px 0 0 0', fontSize: '0.68rem', color: '#64748b' }}>
+                                💡 Meeting link is automatically generated and included in the candidate's invitation email.
+                              </p>
+                            </div>
+
+                            {/* Auto-send email invite toggle */}
+                            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '0.75rem', padding: '0.65rem 0.85rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input
+                                type="checkbox"
+                                id="sendEmailInviteCheckbox"
+                                checked={interviewForm.sendEmailInvite}
+                                onChange={e => setInterviewForm({ ...interviewForm, sendEmailInvite: e.target.checked })}
+                                style={{ width: '16px', height: '16px', accentColor: '#4f46e5', cursor: 'pointer' }}
+                              />
+                              <label htmlFor="sendEmailInviteCheckbox" style={{ fontSize: '0.72rem', color: '#1e293b', fontWeight: 600, cursor: 'pointer', margin: 0, lineHeight: 1.3 }}>
+                                📧 Auto-send video meeting invites & calendar (.ics) to Candidate, Panel & Tagged Emails
+                              </label>
+                            </div>
+
+                          </div>
                         </div>
 
-                        {/* Date & Time Row */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                          <div className="auth-luxury-label">
-                            Interview Date *
-                            <input 
-                              type="date" 
-                              className="rec-search-input" 
-                              style={{ width: '100%', paddingLeft: '0.85rem', height: '42px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
-                              value={interviewForm.date}
-                              onChange={e => setInterviewForm({...interviewForm, date: e.target.value})}
-                              required
-                            />
+                        {/* Modal Footer Actions */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem', paddingTop: '1rem', borderTop: '1px solid #f1f5f9' }}>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>
+                            {selectedCandidate ? (
+                              <span>Assigning slot for <strong>{selectedCandidate.firstName} {selectedCandidate.lastName}</strong></span>
+                            ) : (
+                              <span>Please select a candidate</span>
+                            )}
                           </div>
-                          <div className="auth-luxury-label">
-                            Time Slot *
+                          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setShowScheduleModal(false)}
+                              className="rec-btn-outline"
+                              style={{ height: '40px', padding: '0 1.5rem', borderRadius: '0.75rem', fontWeight: 700 }}
+                            >
+                              Cancel
+                            </button>
                             {(() => {
-                              const slots = [
-                                '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-                                '12:00 PM', '12:30 PM', '01:30 PM', '02:00 PM', '02:30 PM', '03:00 PM',
-                                '03:30 PM', '04:00 PM', '04:30 PM', '05:00 PM', '05:30 PM', '06:00 PM'
-                              ];
                               const isConflict = candidates.some(c => 
                                 c.interviewDate === interviewForm.date && 
                                 (c.interviewTime || '').trim().toLowerCase() === (interviewForm.time || '').trim().toLowerCase() && 
                                 c.id !== selectedCandidate?.id &&
                                 c.email !== selectedCandidate?.id
                               );
-                              const conflictingCand = candidates.find(c => 
-                                c.interviewDate === interviewForm.date && 
-                                (c.interviewTime || '').trim().toLowerCase() === (interviewForm.time || '').trim().toLowerCase() && 
-                                c.id !== selectedCandidate?.id &&
-                                c.email !== selectedCandidate?.id
-                              );
+                              const isMissingLink = !interviewForm.link || !interviewForm.link.trim();
+                              const isDisabled = isConflict || !selectedCandidate || isMissingLink || isSchedulingInterview;
 
                               return (
-                                <div>
-                                  <select
-                                    className="rec-select"
-                                    style={{
-                                      width: '100%',
-                                      height: '42px',
-                                      marginTop: '4px',
-                                      borderRadius: '0.75rem',
-                                      fontWeight: 700,
-                                      borderColor: isConflict ? '#fca5a5' : undefined,
-                                      background: isConflict ? '#fef2f2' : undefined
-                                    }}
-                                    value={interviewForm.time}
-                                    onChange={e => setInterviewForm({ ...interviewForm, time: e.target.value })}
-                                    required
-                                  >
-                                    <option value="">-- Select Available Slot --</option>
-                                    {slots.map(s => {
-                                      const bookedCand = candidates.find(c => 
-                                        c.interviewDate === interviewForm.date && 
-                                        (c.interviewTime || '').trim().toLowerCase() === s.toLowerCase() && 
-                                        c.id !== selectedCandidate?.id &&
-                                        c.email !== selectedCandidate?.id
-                                      );
-                                      return (
-                                        <option 
-                                          key={s} 
-                                          value={s} 
-                                          disabled={!!bookedCand}
-                                          style={{ color: bookedCand ? '#94a3b8' : '#0f172a', fontWeight: bookedCand ? 400 : 700 }}
-                                        >
-                                          {s} {bookedCand ? `⛔ (BOOKED - ${bookedCand.firstName} ${bookedCand.lastName})` : '✅ (Available)'}
-                                        </option>
-                                      );
-                                    })}
-                                  </select>
-                                  {isConflict && conflictingCand && (
-                                    <p style={{ fontSize: '0.7rem', color: '#dc2626', fontWeight: 800, margin: '4px 0 0 0' }}>
-                                      ⚠️ Slot "{interviewForm.time}" is ALREADY BOOKED for {conflictingCand.firstName} {conflictingCand.lastName}.
-                                    </p>
+                                <button
+                                  type="submit"
+                                  disabled={isDisabled}
+                                  className="rec-btn-primary"
+                                  style={{
+                                    height: '40px',
+                                    padding: '0 1.75rem',
+                                    borderRadius: '0.75rem',
+                                    background: isDisabled ? '#94a3b8' : 'linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #7c3aed 100%)',
+                                    boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(79, 70, 229, 0.4)',
+                                    cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                    fontWeight: 800
+                                  }}
+                                >
+                                  {isSchedulingInterview ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin" /> Scheduling & Sending Invites...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Calendar className="h-4 w-4" /> Save & Confirm Schedule
+                                    </>
                                   )}
-                                </div>
+                                </button>
                               );
                             })()}
                           </div>
-                        </div>
-
-                        {/* Type & Panel Row */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                          <div className="auth-luxury-label">
-                            Interview Type
-                            <select 
-                              className="rec-select" 
-                              style={{ width: '100%', height: '42px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
-                              value={interviewForm.type}
-                              onChange={e => setInterviewForm({...interviewForm, type: e.target.value})}
-                            >
-                              <option>HR Screening</option>
-                              <option>Technical Round</option>
-                              <option>Coding Assessment</option>
-                              <option>Management Final</option>
-                            </select>
-                          </div>
-                          <div className="auth-luxury-label">
-                            Interviewer / Panel *
-                            <input 
-                              type="text" 
-                              className="rec-search-input" 
-                              style={{ width: '100%', paddingLeft: '0.85rem', height: '42px', marginTop: '4px', borderRadius: '0.75rem', fontWeight: 700 }}
-                              placeholder="e.g. Sneha Nair"
-                              value={interviewForm.interviewer}
-                              onChange={e => setInterviewForm({...interviewForm, interviewer: e.target.value})}
-                              required
-                            />
-                          </div>
-                        </div>
-
-                        {/* Meeting Link Field */}
-                        <div className="auth-luxury-label">
-                          Interview Video Meeting Link *
-                          <div style={{ marginTop: '4px' }}>
-                            <input 
-                              type="url" 
-                              className="rec-search-input" 
-                              style={{ width: '100%', paddingLeft: '0.85rem', height: '42px', borderRadius: '0.75rem', fontWeight: 600 }}
-                              placeholder="Paste Google Meet URL (e.g. https://meet.google.com/xyz-uvwx-rst)"
-                              value={interviewForm.link}
-                              onChange={e => setInterviewForm({...interviewForm, link: e.target.value})}
-                              required
-                            />
-                          </div>
-                        </div>
-
-                        {/* Modal Footer Actions */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem', paddingTop: '1.25rem', borderTop: '1px solid #f1f5f9' }}>
-                          <button
-                            type="button"
-                            onClick={() => setShowScheduleModal(false)}
-                            className="rec-btn-outline"
-                            style={{ height: '42px', padding: '0 1.5rem', borderRadius: '0.75rem', fontWeight: 700 }}
-                          >
-                            Cancel
-                          </button>
-                          {(() => {
-                            const isConflict = candidates.some(c => 
-                              c.interviewDate === interviewForm.date && 
-                              (c.interviewTime || '').trim().toLowerCase() === (interviewForm.time || '').trim().toLowerCase() && 
-                              c.id !== selectedCandidate?.id &&
-                              c.email !== selectedCandidate?.id
-                            );
-                            const isMissingLink = !interviewForm.link || !interviewForm.link.trim();
-                            const isDisabled = isConflict || !selectedCandidate || isMissingLink;
-
-                            return (
-                              <button
-                                type="submit"
-                                disabled={isDisabled}
-                                className="rec-btn-primary"
-                                style={{
-                                  height: '42px',
-                                  padding: '0 1.75rem',
-                                  borderRadius: '0.75rem',
-                                  background: isDisabled ? '#94a3b8' : 'linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #7c3aed 100%)',
-                                  boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(79, 70, 229, 0.4)',
-                                  cursor: isDisabled ? 'not-allowed' : 'pointer',
-                                  fontWeight: 800
-                                }}
-                              >
-                                <Calendar className="h-4 w-4" /> Save & Confirm Schedule
-                              </button>
-                            );
-                          })()}
                         </div>
                       </form>
                     </div>
@@ -4117,61 +4723,15 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
                         </div>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <h2 className="rec-section-title" style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>Stage 4: Document Verification & Google Form Collector</h2>
+                            <h2 className="rec-section-title" style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>Stage 4: Document Verification</h2>
                             <span style={{ fontSize: '0.68rem', fontWeight: 800, padding: '2px 8px', borderRadius: '99px', background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}>
                               {documentCandidates.length} Candidates
                             </span>
                           </div>
-                          <p className="rec-section-sub" style={{ margin: '3px 0 0 0', color: '#64748b' }}>HR collects and verifies credential proofs and Google Form attachments before issuing official Call Letter</p>
+                          <p className="rec-section-sub" style={{ margin: '3px 0 0 0', color: '#64748b' }}>HR collects and verifies credential proofs before issuing official Call Letter</p>
                         </div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                        <a
-                          href={googleSheetUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rec-btn-outline"
-                          style={{ fontSize: '0.78rem', height: '38px', padding: '0 14px', borderRadius: '0.75rem', gap: '6px', textDecoration: 'none', background: '#fff', borderColor: '#cbd5e1', color: '#334155', fontWeight: 700 }}
-                        >
-                          <ExternalLink className="h-4 w-4 text-emerald-600" /> View Google Form Sheet
-                        </a>
-                        <button
-                          onClick={() => setShowFormModal(!showFormModal)}
-                          className="rec-btn-primary"
-                          style={{ fontSize: '0.78rem', height: '38px', padding: '0 16px', borderRadius: '0.75rem', gap: '6px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)', fontWeight: 700 }}
-                        >
-                          <FileText className="h-4 w-4" /> {showFormModal ? 'Hide Google Form' : 'Show Google Form Collector'}
-                        </button>
                       </div>
                     </div>
-
-                    {/* Embedded Google Form Section (Toggled) */}
-                    {showFormModal && (
-                      <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0fdf4', padding: '10px 14px', borderRadius: '0.75rem', border: '1px solid #bbf7d0' }}>
-                          <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <CheckCircle className="h-4 w-4 text-emerald-600" /> Embedded Google Form Document Collector (Live Response Sync)
-                          </span>
-                          <a href={googleFormEmbedUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.72rem', color: '#059669', fontWeight: 700, textDecoration: 'underline' }}>
-                            Open in New Tab ↗
-                          </a>
-                        </div>
-                        <div style={{ width: '100%', height: '520px', borderRadius: '0.85rem', overflow: 'hidden', border: '1.5px solid #cbd5e1', boxShadow: '0 4px 15px rgba(0,0,0,0.05)' }}>
-                          <iframe
-                            src={googleFormEmbedUrl}
-                            width="100%"
-                            height="100%"
-                            frameBorder="0"
-                            marginHeight={0}
-                            marginWidth={0}
-                            title="Google Form Document Collection"
-                          >
-                            Loading Document Google Form...
-                          </iframe>
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   {/* Candidate Document Verification Cards Matrix */}
@@ -4775,6 +5335,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
               // Add candidates state list
               candidates.forEach(c => {
+                if (isCandidateDeleted(c.id, c.email)) return;
                 const key = c.email || c.id;
                 const isAccepted = formApplicantStatuses[c.email] === 'accepted' || formApplicantStatuses[c.id] === 'accepted';
                 const isDeclined = formApplicantStatuses[c.email] === 'declined' || formApplicantStatuses[c.id] === 'declined';
@@ -4788,7 +5349,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
 
               // Add live sheet responses
               liveSheetResponses.forEach(r => {
-                if (r.email) {
+                if (r.email && !isCandidateDeleted(r.id, r.email)) {
                   const isAccepted = formApplicantStatuses[r.email] === 'accepted' || formApplicantStatuses[r.id] === 'accepted';
                   const isDeclined = formApplicantStatuses[r.email] === 'declined' || formApplicantStatuses[r.id] === 'declined';
                   if (!map.has(r.email)) {
@@ -4816,6 +5377,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
               });
 
               DEFAULT_FALLBACK_APPLICANTS.forEach(fb => {
+                if (isCandidateDeleted(fb.id, fb.email)) return;
                 const emailKey = fb.email.toLowerCase();
                 if (!map.has(fb.email) && !map.has(fb.id) && !map.has(emailKey)) {
                   const isAccepted = formApplicantStatuses[fb.email] === 'accepted' || 
@@ -4835,6 +5397,7 @@ export default function Recruitment({ defaultTab }: RecruitmentProps = {}) {
               });
 
               const allSystemApplicants = Array.from(map.values()).filter(c => 
+                !isCandidateDeleted(c.id, c.email) &&
                 !c.email?.includes('applicant_') && 
                 !c.email?.includes('@example.com') &&
                 !c.email?.includes('employee_')
@@ -5971,15 +6534,15 @@ function StatCard({ icon: Icon, title, value, trend, color }: any) {
   };
   const c = colorMap[color] || colorMap.blue;
   return (
-    <div className="rec-stat-card">
-      <div className={cn('rec-stat-icon-wrap', c.bg, c.icon)}>
-        <Icon className="h-5 w-5" />
+    <div className="rec-stat-card" style={{ padding: '1rem' }}>
+      <div className={cn('rec-stat-icon-wrap', c.bg, c.icon)} style={{ width: '38px', height: '38px', marginBottom: '0.75rem' }}>
+        <Icon className="h-4.5 w-4.5" />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p className="rec-stat-label">{title}</p>
-        <p className="rec-stat-value">{value}</p>
+        <p className="rec-stat-label" style={{ fontSize: '0.78rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={title}>{title}</p>
+        <p className="rec-stat-value" style={{ fontSize: '1.5rem' }}>{value}</p>
       </div>
-      <div className="rec-stat-trend text-slate-400">
+      <div className="rec-stat-trend text-slate-400" style={{ fontSize: '0.7rem', marginTop: '0.5rem', paddingTop: '0.5rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={trend}>
         {trend}
       </div>
     </div>

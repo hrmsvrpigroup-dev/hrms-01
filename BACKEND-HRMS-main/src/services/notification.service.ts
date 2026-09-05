@@ -34,7 +34,7 @@ function getNodemailerTransporter() {
 }
 
 export const notificationService = {
-  async sendEmail(to: string, subject: string, html: string, text?: string, attachments?: any[]) {
+  async sendEmail(to: string, subject: string, html: string, text?: string, attachments?: any[], fromNameOverride?: string) {
     // If in test mode, just log it
     if (process.env.NODE_ENV === 'test') {
       console.log('-----------------------------------------------------')
@@ -61,7 +61,9 @@ export const notificationService = {
           content: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,
         }))
 
-        const fromAddress = process.env.RESEND_FROM || process.env.SMTP_FROM || 'HRMS <onboarding@resend.dev>'
+        const fromAddress = fromNameOverride 
+          ? `"${fromNameOverride}" <onboarding@resend.dev>`
+          : (process.env.RESEND_FROM || process.env.SMTP_FROM || '"VR PI" <onboarding@resend.dev>')
 
         const { data, error } = await getResendClient().emails.send({
           from: fromAddress, 
@@ -92,15 +94,21 @@ export const notificationService = {
       console.log(`[Nodemailer] Falling back to SMTP to send email to ${to}`)
       try {
         const transporter = getNodemailerTransporter()
+        const senderFrom = fromNameOverride
+          ? `"${fromNameOverride}" <${process.env.SMTP_USER || 'vrpigroup@gmail.com'}>`
+          : (process.env.SMTP_FROM 
+              || (process.env.SMTP_USER ? `"VR PI" <${process.env.SMTP_USER}>` : '"VR PI" <vrpigroup@gmail.com>'))
+
         const info = await transporter.sendMail({
-          from: process.env.SMTP_FROM || 'HRMS <no-reply@hrmsvrpigroup.com>',
+          from: senderFrom,
           to,
           subject,
           text: text || 'Please enable HTML to view this email.',
           html,
           attachments: attachments?.map(att => ({
             filename: att.filename,
-            content: att.content
+            content: att.content,
+            contentType: att.contentType
           }))
         })
         console.log(`[Nodemailer] Email successfully sent to ${to}: ${info.messageId}`)

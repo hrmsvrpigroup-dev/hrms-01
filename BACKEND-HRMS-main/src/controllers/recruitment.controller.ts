@@ -2,6 +2,7 @@ import { Response } from 'express'
 import { prisma } from '../config/database'
 import { AuthRequest } from '../middleware/auth.middleware'
 import { sendError, sendSuccess } from '../utils/response.utils'
+import { interviewService, generateTeamsMeetingLink } from '../services/interview.service'
 
 export const recruitmentController = {
   // Get all jobs and applicants
@@ -28,7 +29,7 @@ export const recruitmentController = {
         const defaultJob = await prisma.jobPosting.create({
           data: {
             tenantId,
-            title: 'Full Stack Engineer (Google Form Recruitment)',
+            title: 'Full Stack Engineer',
             department: 'Engineering',
             description: 'Official Google Form Recruitment Pipeline for Engineering & Product roles',
             status: 'OPEN',
@@ -337,25 +338,87 @@ export const recruitmentController = {
   async scheduleInterview(req: AuthRequest, res: Response) {
     try {
       const { id } = req.params
-      const { interviewDate, interviewTime, interviewType, interviewer, interviewLink, decision } = req.body
+      const { 
+        interviewDate, 
+        interviewTime, 
+        interviewType, 
+        interviewer, 
+        interviewLink, 
+        decision,
+        candidateEmail,
+        interviewerEmail,
+        taggedEmails,
+        sendEmailInvite = true,
+        notes
+      } = req.body
       const tenantId = req.tenantId ?? req.user?.tenantId
       if (!tenantId) {
         return sendError(res, 'Tenant context not found', 400)
       }
 
-      const application = await prisma.jobApplication.findFirst({
-        where: { id, job: { tenantId } }
+      let application = await prisma.jobApplication.findFirst({
+        where: {
+          OR: [
+            { id },
+            ...(candidateEmail ? [{ email: candidateEmail }] : []),
+            ...(id.includes('@') ? [{ email: id }] : [])
+          ],
+          job: { tenantId }
+        },
+        include: { job: true }
       })
+
       if (!application) {
-        return sendError(res, 'Application not found or unauthorized access', 404)
+        let activeJob = await prisma.jobPosting.findFirst({
+          where: { tenantId, status: 'OPEN' }
+        })
+        if (!activeJob) {
+          activeJob = await prisma.jobPosting.create({
+            data: {
+              tenantId,
+              title: req.body.jobTitle || 'Full Stack Engineer (Google Form Recruitment)',
+              department: 'Engineering',
+              description: 'Official Recruitment Pipeline',
+              status: 'OPEN',
+            }
+          })
+        }
+
+        const candName = req.body.candidateName || req.body.name || 'Candidate'
+        const candEmail = candidateEmail || (id.includes('@') ? id : `applicant_${Date.now()}@example.com`)
+
+        application = await prisma.jobApplication.create({
+          data: {
+            jobId: activeJob.id,
+            name: candName,
+            email: candEmail,
+            phone: req.body.phone || null,
+            experience: req.body.experience || 'Degree',
+            source: req.body.source || 'Google Form',
+            skills: Array.isArray(req.body.skills) ? req.body.skills : ['Scheduled Interview'],
+            resumeUrl: req.body.resumeUrl || 'applicant-resume.pdf',
+            status: 'INTERVIEW',
+            interviewDate: interviewDate ? new Date(interviewDate) : null,
+            interviewTime: interviewTime || null,
+            interviewType: interviewType || 'HR Screening',
+            interviewer: interviewer || null,
+            interviewLink: interviewLink || null,
+          },
+          include: { job: true }
+        })
       }
+
+      const finalMeetingLink = interviewLink && interviewLink.trim()
+        ? interviewLink.trim()
+        : await generateTeamsMeetingLink(`Interview: ${application.name} - ${application.job?.title || 'Candidate'}`)
 
       const updateData: any = {}
       if (interviewDate) updateData.interviewDate = new Date(interviewDate)
       if (interviewTime) updateData.interviewTime = interviewTime
       if (interviewType) updateData.interviewType = interviewType
       if (interviewer) updateData.interviewer = interviewer
-      if (interviewLink) updateData.interviewLink = interviewLink
+      updateData.interviewLink = finalMeetingLink
+
       if (decision) {
         updateData.status = decision === 'pass' ? 'DOCUMENTS' : 'REJECTED'
       } else {
@@ -363,13 +426,98 @@ export const recruitmentController = {
       }
 
       const updated = await prisma.jobApplication.update({
-        where: { id },
+        where: { id: application.id },
         data: updateData
       })
 
-      return sendSuccess(res, updated, 'Interview details updated successfully')
+      // If scheduling a new/updated interview (not a pass/fail decision) and email invite is enabled
+      let emailDispatchResult = null
+      if (!decision && sendEmailInvite && (interviewDate || application.interviewDate) && (interviewTime || application.interviewTime)) {
+        try {
+          const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } })
+          const resolvedCandidateEmail = candidateEmail || application.email
+          const formattedDate = interviewDate 
+            ? (typeof interviewDate === 'string' ? interviewDate.split('T')[0] : new Date(interviewDate).toISOString().split('T')[0])
+            : (application.interviewDate ? new Date(application.interviewDate).toISOString().split('T')[0] : '')
+
+          emailDispatchResult = await interviewService.sendInterviewInvites({
+            candidateName: req.body.candidateName || application.name || 'Candidate',
+            candidateEmail: resolvedCandidateEmail,
+            jobTitle: application.job?.title || 'Recruitment Position',
+            interviewType: interviewType || application.interviewType || 'HR Screening',
+            interviewerName: interviewer || application.interviewer || 'Interview Panel',
+            interviewerEmail: interviewerEmail,
+            interviewDate: formattedDate,
+            interviewTime: interviewTime || application.interviewTime || '11:30 AM',
+            interviewLink: finalMeetingLink,
+            taggedEmails: Array.isArray(taggedEmails) ? taggedEmails : (taggedEmails ? [taggedEmails] : []),
+            tenantName: tenant?.name || 'VRPI Group HRMS',
+            notes: notes || undefined
+          })
+        } catch (emailErr: any) {
+          console.error('[RecruitmentController] Failed to dispatch interview email invite:', emailErr.message || emailErr)
+        }
+      }
+
+      return sendSuccess(res, { ...updated, emailDispatchResult }, 'Interview details updated successfully')
     } catch (error: any) {
       return sendError(res, error.message || 'Failed to update interview', 500)
+    }
+  },
+
+  // Auto-generate Microsoft Teams meeting URL
+  async generateTeamsLink(req: AuthRequest, res: Response) {
+    try {
+      const { topic } = req.body || {}
+      const link = await generateTeamsMeetingLink(topic || 'HRMS Interview Session')
+      return sendSuccess(res, { link }, 'Teams meeting link generated successfully')
+    } catch (error: any) {
+      return sendError(res, error.message || 'Failed to generate Teams meeting link', 500)
+    }
+  },
+
+  // Direct dispatch of interview email invites (works for any candidate or external applicant)
+  async sendInterviewInviteDirect(req: AuthRequest, res: Response) {
+    try {
+      const {
+        candidateName,
+        candidateEmail,
+        jobTitle,
+        interviewType,
+        interviewer,
+        interviewerEmail,
+        interviewDate,
+        interviewTime,
+        interviewLink,
+        taggedEmails,
+        notes
+      } = req.body
+
+      const tenantId = req.tenantId ?? req.user?.tenantId
+      const tenant = tenantId ? await prisma.tenant.findUnique({ where: { id: tenantId } }) : null
+
+      const finalLink = interviewLink && interviewLink.trim()
+        ? interviewLink.trim()
+        : await generateTeamsMeetingLink(`Interview: ${candidateName || 'Candidate'}`)
+
+      const result = await interviewService.sendInterviewInvites({
+        candidateName: candidateName || 'Candidate',
+        candidateEmail,
+        jobTitle: jobTitle || 'Recruitment Position',
+        interviewType: interviewType || 'HR Screening',
+        interviewerName: interviewer || 'Interview Panel',
+        interviewerEmail: interviewerEmail,
+        interviewDate: interviewDate || new Date().toISOString().split('T')[0],
+        interviewTime: interviewTime || '11:30 AM',
+        interviewLink: finalLink,
+        taggedEmails: Array.isArray(taggedEmails) ? taggedEmails : (taggedEmails ? [taggedEmails] : []),
+        tenantName: tenant?.name || 'VRPI Group HRMS',
+        notes: notes || undefined
+      })
+
+      return sendSuccess(res, { ...result, link: finalLink }, 'Interview invites dispatched successfully')
+    } catch (error: any) {
+      return sendError(res, error.message || 'Failed to dispatch interview invites', 500)
     }
   },
 
